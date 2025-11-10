@@ -1,5 +1,5 @@
-// ✅ Responsive Login Screen (Works on All Screen Sizes)
-// Uses proportional scaling for all UI elements and fonts
+// ✅ Responsive Signup Screen (works on all screen sizes)
+// Matches LoginScreen styling and responsiveness
 
 import React, { useState } from 'react';
 import {
@@ -11,7 +11,6 @@ import {
   Image,
   Alert,
   Dimensions,
-  PixelRatio,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import LinearGradient from 'react-native-linear-gradient';
@@ -19,39 +18,45 @@ import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LoginScreenProps } from '../../App';
 
-// ✅ Get device screen dimensions
+// ✅ Responsive helpers
 const { width, height } = Dimensions.get('window');
-
-// ✅ Scale helpers for responsive UI
-// Base reference: iPhone X (width: 375, height: 812)
-const scale = (size: number) => (width / 375) * size; // for width-based elements
-const verticalScale = (size: number) => (height / 812) * size; // for height-based elements
+const scale = (size: number) => (width / 375) * size;
+const verticalScale = (size: number) => (height / 812) * size;
 const moderateScale = (size: number, factor = 0.5) =>
-  size + (scale(size) - size) * factor; // balanced font scaling
+  size + (scale(size) - size) * factor;
 
-const LoginScreen = ({ navigation }: LoginScreenProps) => {
+const SignupScreen = ({ navigation }: LoginScreenProps) => {
+  // 🧩 Local state for form inputs
+  const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
 
-  const handleLogin = async () => {
-    if (!email || !password) {
-      Alert.alert('Error', 'Please enter both email and password.');
-      console.log('Login unsuccessfully:'); // 🧩 Add this
+  // 🧠 Handle Signup Logic
+  const handleSignup = async () => {
+    if (!fullName || !email || !password || !confirmPassword) {
+      Alert.alert('Error', 'Please fill in all fields.');
+      return;
+    }
+
+    if (password !== confirmPassword) {
+      Alert.alert('Error', 'Passwords do not match.');
       return;
     }
 
     try {
-      const response = await axios.post('http://192.168.1.222:5001/api/auth/login', {
+      const response = await axios.post('http://192.168.1.222:5001/api/auth/register', {
+        full_name: fullName,
         email,
         password,
       });
+
       const { token } = response.data;
       await AsyncStorage.setItem('userToken', token);
-      console.log('💾 Token saved successfully:', token); // 🧩 Add this
-      console.log('✅ Login successful, navigating to Home...');
-      navigation.replace('Home');
+      Alert.alert('Success', 'Account created successfully!');
+      navigation.navigate('Home');
     } catch (error: any) {
-      Alert.alert('Login Failed', error.response?.data?.error || 'Invalid credentials');
+      Alert.alert('Signup Failed', error.response?.data?.error || 'Something went wrong');
     }
   };
 
@@ -63,7 +68,7 @@ const LoginScreen = ({ navigation }: LoginScreenProps) => {
       style={styles.gradientBackground}
     >
       <SafeAreaView style={styles.container}>
-        {/* 🔵 Header Section with circular logo wrapper */}
+        {/* 🔵 Top header with circular logo */}
         <View style={styles.blueHeader}>
           <View style={styles.logoWrapper}>
             <Image
@@ -73,11 +78,18 @@ const LoginScreen = ({ navigation }: LoginScreenProps) => {
           </View>
         </View>
 
-        {/* ⚪ White content container */}
+        {/* ⚪ Signup form container */}
         <View style={styles.formContainer}>
-          <Text style={styles.title}>Welcome Back</Text>
+          <Text style={styles.title}>Create Account</Text>
 
-          {/* Email Input */}
+          <TextInput
+            style={styles.input}
+            placeholder="Full Name"
+            placeholderTextColor="#666"
+            value={fullName}
+            onChangeText={setFullName}
+          />
+
           <TextInput
             style={styles.input}
             placeholder="Email Address"
@@ -88,7 +100,6 @@ const LoginScreen = ({ navigation }: LoginScreenProps) => {
             onChangeText={setEmail}
           />
 
-          {/* Password Input */}
           <TextInput
             style={styles.input}
             placeholder="Password"
@@ -98,19 +109,27 @@ const LoginScreen = ({ navigation }: LoginScreenProps) => {
             onChangeText={setPassword}
           />
 
-          {/* Login Button */}
-          <TouchableOpacity style={styles.button} onPress={handleLogin}>
-            <Text style={styles.buttonText}>Login</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="Confirm Password"
+            placeholderTextColor="#666"
+            secureTextEntry
+            value={confirmPassword}
+            onChangeText={setConfirmPassword}
+          />
+
+          {/* Signup Button */}
+          <TouchableOpacity style={styles.button} onPress={handleSignup}>
+            <Text style={styles.buttonText}>Sign Up</Text>
           </TouchableOpacity>
 
-          {/* Footer */}
-          <Text style={styles.footerText}>Don’t have an account?</Text>
+          <Text style={styles.footerText}>Already have an account?</Text>
 
           <TouchableOpacity
-            style={styles.signupButton}
-            onPress={() => navigation.navigate('Register')}
+            style={styles.loginButton}
+            onPress={() => navigation.navigate('Login')}
           >
-            <Text style={styles.signupButtonText}>Sign Up</Text>
+            <Text style={styles.loginButtonText}>Login</Text>
           </TouchableOpacity>
         </View>
       </SafeAreaView>
@@ -118,7 +137,7 @@ const LoginScreen = ({ navigation }: LoginScreenProps) => {
   );
 };
 
-export default LoginScreen;
+export default SignupScreen;
 
 const styles = StyleSheet.create({
   gradientBackground: {
@@ -131,18 +150,18 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-start',
   },
 
-  // 🔵 Gradient header with responsive height
+  // 🔵 Gradient header with rounded bottom edges
   blueHeader: {
     width: '100%',
-    height: height * 0.18, // 📱 dynamic height based on screen
+    height: height * 0.18,
     justifyContent: 'flex-end',
     alignItems: 'center',
-    borderBottomLeftRadius: scale(60), // 📏 scaled for width
+    borderBottomLeftRadius: scale(60),
     borderBottomRightRadius: scale(60),
     overflow: 'hidden',
   },
 
-  // ⚪ Logo circular background wrapper
+  // ⚪ Logo background circle
   logoWrapper: {
     backgroundColor: '#FFFFFF',
     borderRadius: scale(60),
@@ -152,29 +171,28 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     shadowOffset: { width: 0, height: 4 },
     position: 'relative',
-    marginTop: verticalScale(-40), // 📏 moves up proportionally
+    marginTop: verticalScale(-40),
   },
 
-  // 🖼️ Logo image itself
   logo: {
-    width: scale(230), // 📱 resizes according to screen width
-    height: verticalScale(180), // 📏 resizes according to height
+    width: scale(230),
+    height: verticalScale(180),
     resizeMode: 'contain',
     marginHorizontal: scale(20),
     bottom: verticalScale(-30),
   },
 
-  // ⚪ White box container for the form
+  // ⚪ White main container
   formContainer: {
     position: 'absolute',
-    bottom: verticalScale(20), // 📏 spacing adapts to height
+    bottom: verticalScale(20),
     backgroundColor: '#fff',
     width: '95%',
-    height: height * 0.75, // 📱 dynamic vertical height
+    height: height * 0.78,
     borderRadius: scale(30),
     alignItems: 'center',
     paddingHorizontal: scale(30),
-    paddingTop: verticalScale(120),
+    paddingTop: verticalScale(100),
     elevation: 10,
     shadowColor: '#000',
     shadowOpacity: 0.1,
@@ -182,15 +200,13 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: -2 },
   },
 
-  // 🟦 Title text — responsive font
   title: {
-    fontSize: moderateScale(26), // 📏 scales smoothly
+    fontSize: moderateScale(26),
     fontWeight: '700',
     color: '#007BFF',
-    marginBottom: verticalScale(30),
+    marginBottom: verticalScale(25),
   },
 
-  // ✏️ Input fields
   input: {
     width: '100%',
     height: verticalScale(50),
@@ -198,38 +214,34 @@ const styles = StyleSheet.create({
     borderColor: '#007BFF',
     borderRadius: scale(12),
     paddingHorizontal: scale(15),
-    marginBottom: verticalScale(16),
+    marginBottom: verticalScale(14),
     fontSize: moderateScale(16),
   },
 
-  // 🔵 Login button
   button: {
     width: '50%',
     backgroundColor: '#0A9EFA',
     borderRadius: scale(15),
     paddingVertical: verticalScale(10),
     alignItems: 'center',
-    marginTop: verticalScale(12),
+    marginTop: verticalScale(10),
     borderWidth: 2,
     borderColor: '#0367A6',
   },
 
-  // 🔵 Button text
   buttonText: {
     color: '#fff',
     fontSize: moderateScale(16),
     fontWeight: '700',
   },
 
-  // 🧾 Footer text (“Don’t have an account?”)
   footerText: {
-    marginTop: verticalScale(100),
+    marginTop: verticalScale(50),
     color: '#444',
-    fontSize: moderateScale(14), // 📏 responsive
+    fontSize: moderateScale(14),
   },
 
-  // 🟩 Sign Up button
-  signupButton: {
+  loginButton: {
     width: '40%',
     backgroundColor: '#0A9EFA',
     borderRadius: scale(12),
@@ -240,7 +252,7 @@ const styles = StyleSheet.create({
     borderColor: '#0367A6',
   },
 
-  signupButtonText: {
+  loginButtonText: {
     color: '#fff',
     fontSize: moderateScale(16),
     fontWeight: '700',

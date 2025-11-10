@@ -1,27 +1,45 @@
+// ======================================================================
+// 📦 Gradle Build Configuration for LendingApp (React Native)
+// ----------------------------------------------------------------------
+// This file defines how the Android app is built, what SDKs it uses,
+// and integrates libraries like Hermes and React Native Vector Icons.
+// ======================================================================
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("com.facebook.react")
 }
 
-// Read Hermes flag from gradle.properties
-def hermesEnabled = project.hasProperty('hermesEnabled') ? project.getProperty('hermesEnabled').toBoolean() : true
+// ======================================================================
+// ⚙️ Project Flags
+// ======================================================================
 
+// Read Hermes flag from gradle.properties (default: true)
+def hermesEnabled = project.hasProperty('hermesEnabled')
+        ? project.getProperty('hermesEnabled').toBoolean()
+        : true
+
+// Toggle ProGuard (code minification) for release builds
 def enableProguardInReleaseBuilds = false
 
+// ======================================================================
+// 🧩 Android Configuration
+// ======================================================================
 android {
-    namespace "com.lendingapp" // Replace with your package name
-    compileSdk 36               // Updated to match dependencies
-    buildToolsVersion "36.0.0"  // Optional
+    namespace "com.lendingapp" // ✅ Change to match your package name
+    compileSdk 36               // ✅ Must match your React Native version
+    buildToolsVersion "36.0.0"  // Optional but keeps builds consistent
 
     defaultConfig {
-        applicationId "com.lendingapp" // Replace with your package name
-        minSdkVersion 24                     // Must be >= library requirements (Worklets require 24+)
+        applicationId "com.lendingapp" // ✅ Same as package name
+        minSdkVersion 24               // ✅ Required for Reanimated & Worklets
         targetSdk 36
         versionCode 1
         versionName "1.0"
     }
 
+    // 🔑 Debug Signing Config
     signingConfigs {
         debug {
             storeFile file('debug.keystore')
@@ -31,6 +49,7 @@ android {
         }
     }
 
+    // 🏗️ Build Types (Debug & Release)
     buildTypes {
         debug {
             signingConfig signingConfigs.debug
@@ -42,6 +61,7 @@ android {
         }
     }
 
+    // 🧠 Java & Kotlin Compatibility (Required for RN 0.81+)
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
@@ -52,18 +72,41 @@ android {
     }
 }
 
+// ======================================================================
+// ⚛️ React Native Configuration
+// ----------------------------------------------------------------------
+// This ensures your native modules are automatically linked.
+// ======================================================================
 react {
     autolinkLibrariesWithApp()
 }
 
+// ======================================================================
+// 🧩 Dependencies
+// ======================================================================
 dependencies {
+    // Core React Native runtime
     implementation("com.facebook.react:react-android")
 
-    // Hermes support (optional)
+    // 🧠 Hermes JS Engine (Optional but Recommended)
     if (hermesEnabled) {
         implementation("com.facebook.react:hermes-android")
     } else {
-        // JSC
         implementation("io.github.react-native-community:jsc-android:2026004.+")
     }
+
+    // ==================================================================
+    // 🎨 React Native Vector Icons Support
+    // ------------------------------------------------------------------
+    // This ensures font files (like MaterialCommunityIcons.ttf)
+    // are properly packaged into your APK.
+    // ==================================================================
+    project.ext.vectoricons = [
+        iconFontNames: [
+            'MaterialCommunityIcons.ttf', // You can add others here if used
+            'Ionicons.ttf',
+            'Feather.ttf'
+        ]
+    ]
+    apply from: "../../node_modules/react-native-vector-icons/fonts.gradle"
 }
