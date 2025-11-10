@@ -1,0 +1,69 @@
+plugins {
+    id("com.android.application")
+    id("org.jetbrains.kotlin.android")
+    id("com.facebook.react")
+}
+
+// Read Hermes flag from gradle.properties
+def hermesEnabled = project.hasProperty('hermesEnabled') ? project.getProperty('hermesEnabled').toBoolean() : true
+
+def enableProguardInReleaseBuilds = false
+
+android {
+    namespace "com.lendingapp" // Replace with your package name
+    compileSdk 36               // Updated to match dependencies
+    buildToolsVersion "36.0.0"  // Optional
+
+    defaultConfig {
+        applicationId "com.lendingapp" // Replace with your package name
+        minSdkVersion 24                     // Must be >= library requirements (Worklets require 24+)
+        targetSdk 36
+        versionCode 1
+        versionName "1.0"
+    }
+
+    signingConfigs {
+        debug {
+            storeFile file('debug.keystore')
+            storePassword 'android'
+            keyAlias 'androiddebugkey'
+            keyPassword 'android'
+        }
+    }
+
+    buildTypes {
+        debug {
+            signingConfig signingConfigs.debug
+        }
+        release {
+            signingConfig signingConfigs.debug
+            minifyEnabled enableProguardInReleaseBuilds
+            proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    kotlinOptions {
+        jvmTarget = "17"
+    }
+}
+
+react {
+    autolinkLibrariesWithApp()
+}
+
+dependencies {
+    implementation("com.facebook.react:react-android")
+
+    // Hermes support (optional)
+    if (hermesEnabled) {
+        implementation("com.facebook.react:hermes-android")
+    } else {
+        // JSC
+        implementation("io.github.react-native-community:jsc-android:2026004.+")
+    }
+}

@@ -1,0 +1,7 @@
+# Dependencies
+/node_modules
+/ios/pods
+/android/build
+
+# System files
+.DS_Store
