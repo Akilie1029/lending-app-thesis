@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -7,20 +7,41 @@ import {
   TouchableOpacity,
   Alert,
 } from 'react-native';
-import {
-  DrawerContentScrollView,
-} from '@react-navigation/drawer';
+import { DrawerContentScrollView } from '@react-navigation/drawer';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import axios from 'axios';
+
+const API_BASE = 'http://192.168.1.222:5001/api'; // ✅ same API base as HomeScreen
 
 const CustomDrawer = (props: any) => {
-  const user = {
-    name: 'Keanna Mac',
-    email: 'Samples@test.com',
-    avatar: 'https://cdn-icons-png.flaticon.com/512/149/149071.png', // Placeholder avatar
-  };
+  const [user, setUser] = useState<any>(null);
 
-  // ✅ Logout logic (added)
+  // ✅ Fetch user info from /auth/me
+  useEffect(() => {
+    const fetchUser = async () => {
+      try {
+        const token = await AsyncStorage.getItem('userToken');
+        if (!token) {
+          console.log('⚠️ No token found — redirecting to Login');
+          props.navigation.replace('Login');
+          return;
+        }
+
+        const response = await axios.get(`${API_BASE}/auth/me`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+
+        setUser(response.data);
+      } catch (error) {
+        console.error('❌ Failed to load user info:', error);
+      }
+    };
+
+    fetchUser();
+  }, []);
+
+  // ✅ Logout logic
   const handleLogout = () => {
     Alert.alert(
       'Confirm Logout',
@@ -52,9 +73,16 @@ const CustomDrawer = (props: any) => {
           style={styles.logo}
           resizeMode="contain"
         />
-        <Image source={{ uri: user.avatar }} style={styles.avatar} />
-        <Text style={styles.userName}>{user.name}</Text>
-        <Text style={styles.userEmail}>{user.email}</Text>
+        <Image
+          source={{
+            uri:
+              user?.avatar ||
+              'https://cdn-icons-png.flaticon.com/512/149/149071.png',
+          }}
+          style={styles.avatar}
+        />
+        <Text style={styles.userName}>{user?.full_name || 'Loading...'}</Text>
+        <Text style={styles.userEmail}>{user?.email || 'Please wait...'}</Text>
       </View>
 
       {/* ===== Drawer Menu ===== */}
@@ -103,7 +131,6 @@ const CustomDrawer = (props: any) => {
           <Text style={styles.bottomText}>Help & Support</Text>
         </TouchableOpacity>
 
-        {/* ✅ Updated: Added onPress handler for logout */}
         <TouchableOpacity style={styles.bottomItem} onPress={handleLogout}>
           <Icon name="logout" size={22} color="#FF3B30" />
           <Text style={[styles.bottomText, { color: '#FF3B30' }]}>Logout</Text>
@@ -152,6 +179,7 @@ const styles = StyleSheet.create({
     borderWidth: 3,
     borderColor: '#169AF9',
   },
+
   menuItem: {
     flexDirection: 'row',
     alignItems: 'center',
