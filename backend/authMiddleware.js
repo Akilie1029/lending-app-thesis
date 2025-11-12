@@ -1,28 +1,53 @@
+// =================================================================
+//                  AUTH MIDDLEWARE (Stable Version)
+// =================================================================
+
 const jwt = require('jsonwebtoken');
 
-// --- IMPORTANT: This must be the EXACT same secret key as in index.js ---
+// ⚠️ IMPORTANT: Must match JWT_SECRET used in your /auth/login and /auth/register routes
 const JWT_SECRET = 'a_super_secret_key_that_should_be_long_and_random';
 
-module.exports = function(req, res, next) {
-  // 1. Get the token from the request header.
-  const token = req.header('x-auth-token');
+module.exports = function (req, res, next) {
+  const authHeader = req.headers['authorization'];
 
-  // 2. If no token is provided, deny access.
-  if (!token) {
-    return res.status(401).json({ msg: 'No token, authorization denied' });
+  // 🔎 Step 1: Check Authorization header
+  console.log('🔐 Incoming Authorization Header:', authHeader || '(none)');
+  if (!authHeader) {
+    return res.status(401).json({ error: 'No token provided' });
   }
 
-  try {
-    // 3. If a token exists, verify it using the secret key.
-    const decoded = jwt.verify(token, JWT_SECRET);
+  // Expect header like "Bearer <token>"
+  const parts = authHeader.split(' ');
+  if (parts.length !== 2 || parts[0] !== 'Bearer') {
+    console.log('❌ Malformed Authorization header.');
+    return res.status(401).json({ error: 'Malformed token' });
+  }
 
-    // 4. If the token is valid, add the user's info to the request object.
-    req.user = decoded.user;
-    
-    // 5. Call next() to pass the request to the next middleware or route handler.
+  const token = parts[1];
+  console.log('📦 Extracted Token:', token ? token.slice(0, 25) + '...' : 'none');
+
+  try {
+    // 🧠 Step 2: Verify JWT signature
+    const decoded = jwt.verify(token, JWT_SECRET);
+    console.log('✅ JWT Verified. Decoded payload:', decoded);
+
+    // 🧩 Step 3: Normalize payload structure
+    // Some tokens may be { user: { id, email } }, others just { id, email }
+    const userPayload = decoded.user || decoded;
+
+    // 🧩 Step 4: Ensure it contains an ID
+    if (!userPayload?.id) {
+      console.log('❌ JWT payload missing user id.');
+      return res.status(401).json({ error: 'Invalid token payload' });
+    }
+
+    // ✅ Step 5: Attach user info to request
+    req.user = userPayload;
+
+    console.log('👤 Authenticated User ID:', req.user.id);
     next();
   } catch (err) {
-    // If the token is invalid (e.g., expired, tampered with, wrong secret), deny access.
-    res.status(401).json({ msg: 'Token is not valid' });
+    console.error('❌ JWT verification failed:', err.message);
+    return res.status(401).json({ error: 'Invalid or expired token' });
   }
 };

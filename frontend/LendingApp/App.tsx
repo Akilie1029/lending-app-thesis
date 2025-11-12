@@ -13,6 +13,8 @@ import SignupScreen from './src/screens/SignupScreen';
 import HomeScreen from './src/screens/HomeScreen';
 import LoanApplicationScreen from './src/screens/LoanApplicationScreen';
 import AdminDashboardScreen from './src/screens/AdminDashboardScreen';
+import LoanDetailsScreen from './src/screens/LoanDetailsScreen';
+
 
 // --- 🧩 Import the Custom Drawer UI Component ---
 import CustomDrawer from './src/components/CustomDrawer'; // 🆕 Added import
@@ -121,12 +123,18 @@ function App() {
         initialRouteName="Login"
         screenOptions={{ headerShown: false }}
       >
-        {/* 🔐 Authentication Screens */}
+        {/* 🔐 Auth Screens */}
         <Stack.Screen name="Login" component={LoginScreen} />
         <Stack.Screen name="Register" component={SignupScreen} />
 
-        {/* 🏠 Main App (Drawer) */}
+        {/* 🏠 Drawer (Main App Shell) */}
         <Stack.Screen name="Home" component={DrawerNavigator} />
+
+        {/* 📄 Loan Details (Global Access) */}
+        <Stack.Screen name="Loan Details" component={LoanDetailsScreen} />
+
+        {/* 💸 Optional Direct Access */}
+        <Stack.Screen name="Loan Application" component={LoanApplicationScreen} />
       </Stack.Navigator>
     </NavigationContainer>
   );

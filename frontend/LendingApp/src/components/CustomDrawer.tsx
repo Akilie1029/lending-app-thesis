@@ -54,7 +54,10 @@ const CustomDrawer = (props: any) => {
           onPress: async () => {
             try {
               await AsyncStorage.removeItem('userToken');
-              props.navigation.replace('Login'); // Replace with Login screen
+              props.navigation.reset({
+                index: 0,
+                routes: [{ name: 'Login' }], // ✅ Replace stack with Login
+              });
             } catch (error) {
               console.error('Logout failed:', error);
             }
@@ -91,14 +94,18 @@ const CustomDrawer = (props: any) => {
         contentContainerStyle={styles.drawerScroll}
       >
         <View style={styles.drawerItems}>
+          {/* 🏠 Dashboard → Replace to Home */}
           <TouchableOpacity
             style={styles.menuItem}
-            onPress={() => props.navigation.navigate('Home')}
+            onPress={() => {
+              props.navigation.replace('Home');
+            }}
           >
             <Icon name="view-dashboard-outline" size={40} color="#169AF9" />
             <Text style={styles.menuText}>Dashboard</Text>
           </TouchableOpacity>
 
+          {/* 📝 Loan Application */}
           <TouchableOpacity
             style={styles.menuItem}
             onPress={() => props.navigation.navigate('Loan Application')}
@@ -107,17 +114,29 @@ const CustomDrawer = (props: any) => {
             <Text style={styles.menuText}>Loan Application</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.menuItem}>
+          {/* 📄 My Loan */}
+          <TouchableOpacity
+            style={styles.menuItem}
+            onPress={() => props.navigation.navigate('My Loan')}
+          >
             <Icon name="file-document-outline" size={40} color="#169AF9" />
             <Text style={styles.menuText}>My Loan</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.menuItem}>
+          {/* 🧾 Payment History */}
+          <TouchableOpacity
+            style={styles.menuItem}
+            onPress={() => props.navigation.navigate('Payment History')}
+          >
             <Icon name="calendar-month-outline" size={40} color="#169AF9" />
             <Text style={styles.menuText}>Payment History</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.menuItem}>
+          {/* ⚙️ Account Settings */}
+          <TouchableOpacity
+            style={styles.menuItem}
+            onPress={() => props.navigation.navigate('Account Settings')}
+          >
             <Icon name="cog-outline" size={40} color="#169AF9" />
             <Text style={styles.menuText}>Account Settings</Text>
           </TouchableOpacity>
@@ -126,14 +145,19 @@ const CustomDrawer = (props: any) => {
 
       {/* ===== Bottom Section ===== */}
       <View style={styles.bottomSection}>
-        <TouchableOpacity style={styles.bottomItem}>
+        <TouchableOpacity
+          style={styles.bottomItem}
+          onPress={() => props.navigation.navigate('Help Support')}
+        >
           <Icon name="help-circle-outline" size={22} color="#169AF9" />
           <Text style={styles.bottomText}>Help & Support</Text>
         </TouchableOpacity>
 
         <TouchableOpacity style={styles.bottomItem} onPress={handleLogout}>
           <Icon name="logout" size={22} color="#FF3B30" />
-          <Text style={[styles.bottomText, { color: '#FF3B30' }]}>Logout</Text>
+          <Text style={[styles.bottomText, { color: '#FF3B30' }]}>
+            Logout
+          </Text>
         </TouchableOpacity>
       </View>
     </View>
@@ -142,6 +166,7 @@ const CustomDrawer = (props: any) => {
 
 export default CustomDrawer;
 
+// (Your same styles — untouched)
 const styles = StyleSheet.create({
   header: {
     alignItems: 'center',
@@ -179,7 +204,6 @@ const styles = StyleSheet.create({
     borderWidth: 3,
     borderColor: '#169AF9',
   },
-
   menuItem: {
     flexDirection: 'row',
     alignItems: 'center',
