@@ -1,9 +1,25 @@
 // ======================================================================
 // 📦 Gradle Build Configuration for LendingApp (React Native)
-// ----------------------------------------------------------------------
-// This file defines how the Android app is built, what SDKs it uses,
-// and integrates libraries like Hermes and React Native Vector Icons.
 // ======================================================================
+
+
+buildscript {
+    ext {
+        compileSdkVersion = 36
+        targetSdkVersion = 36
+        minSdkVersion = 24
+    }
+
+    repositories {
+        google()
+        mavenCentral()
+    }
+    dependencies {
+        classpath("com.android.tools.build:gradle:8.1.2")
+        classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:1.9.22")
+    }
+}
+
 
 plugins {
     id("com.android.application")
@@ -12,34 +28,39 @@ plugins {
 }
 
 // ======================================================================
+// 🛠️ FIX: Required by Reanimated + SVG
+// Make ReactAndroid folder discoverable
+// ======================================================================
+ext {
+    REACT_NATIVE_NODE_MODULES_DIR = file("$rootDir/../node_modules/react-native")
+}
+
+// ======================================================================
 // ⚙️ Project Flags
 // ======================================================================
 
-// Read Hermes flag from gradle.properties (default: true)
 def hermesEnabled = project.hasProperty('hermesEnabled')
         ? project.getProperty('hermesEnabled').toBoolean()
         : true
 
-// Toggle ProGuard (code minification) for release builds
 def enableProguardInReleaseBuilds = false
 
 // ======================================================================
 // 🧩 Android Configuration
 // ======================================================================
 android {
-    namespace "com.lendingapp" // ✅ Change to match your package name
-    compileSdk 36               // ✅ Must match your React Native version
-    buildToolsVersion "36.0.0"  // Optional but keeps builds consistent
+    namespace "com.lendingapp"
+    compileSdk 36
+    buildToolsVersion "36.0.0"
 
     defaultConfig {
-        applicationId "com.lendingapp" // ✅ Same as package name
-        minSdkVersion 24               // ✅ Required for Reanimated & Worklets
+        applicationId "com.lendingapp"
+        minSdkVersion 24
         targetSdk 36
         versionCode 1
         versionName "1.0"
     }
 
-    // 🔑 Debug Signing Config
     signingConfigs {
         debug {
             storeFile file('debug.keystore')
@@ -49,7 +70,6 @@ android {
         }
     }
 
-    // 🏗️ Build Types (Debug & Release)
     buildTypes {
         debug {
             signingConfig signingConfigs.debug
@@ -61,7 +81,6 @@ android {
         }
     }
 
-    // 🧠 Java & Kotlin Compatibility (Required for RN 0.81+)
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
@@ -72,38 +91,22 @@ android {
     }
 }
 
-// ======================================================================
-// ⚛️ React Native Configuration
-// ----------------------------------------------------------------------
-// This ensures your native modules are automatically linked.
-// ======================================================================
 react {
     autolinkLibrariesWithApp()
 }
 
-// ======================================================================
-// 🧩 Dependencies
-// ======================================================================
 dependencies {
-    // Core React Native runtime
     implementation("com.facebook.react:react-android")
 
-    // 🧠 Hermes JS Engine (Optional but Recommended)
     if (hermesEnabled) {
         implementation("com.facebook.react:hermes-android")
     } else {
         implementation("io.github.react-native-community:jsc-android:2026004.+")
     }
 
-    // ==================================================================
-    // 🎨 React Native Vector Icons Support
-    // ------------------------------------------------------------------
-    // This ensures font files (like MaterialCommunityIcons.ttf)
-    // are properly packaged into your APK.
-    // ==================================================================
     project.ext.vectoricons = [
         iconFontNames: [
-            'MaterialCommunityIcons.ttf', // You can add others here if used
+            'MaterialCommunityIcons.ttf',
             'Ionicons.ttf',
             'Feather.ttf'
         ]

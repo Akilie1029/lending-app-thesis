@@ -1,5 +1,4 @@
-// ✅ Responsive Login Screen (Works on All Screen Sizes)
-// Uses proportional scaling for all UI elements and fonts
+// ✅ Responsive Login Screen with Role-Based Routing
 
 import React, { useState } from 'react';
 import {
@@ -11,7 +10,6 @@ import {
   Image,
   Alert,
   Dimensions,
-  PixelRatio,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import LinearGradient from 'react-native-linear-gradient';
@@ -19,42 +17,78 @@ import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LoginScreenProps } from '../../App';
 
-// ✅ Get device screen dimensions
+// Screen dimensions
 const { width, height } = Dimensions.get('window');
 
-// ✅ Scale helpers for responsive UI
-// Base reference: iPhone X (width: 375, height: 812)
-const scale = (size: number) => (width / 375) * size; // for width-based elements
-const verticalScale = (size: number) => (height / 812) * size; // for height-based elements
+// Responsive scale helpers
+const scale = (size: number) => (width / 375) * size;
+const verticalScale = (size: number) => (height / 812) * size;
 const moderateScale = (size: number, factor = 0.5) =>
-  size + (scale(size) - size) * factor; // balanced font scaling
+  size + (scale(size) - size) * factor;
 
 const LoginScreen = ({ navigation }: LoginScreenProps) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
 
+  // =================================================================
+  //                      HANDLE LOGIN
+  // =================================================================
   const handleLogin = async () => {
     if (!email || !password) {
       Alert.alert('Error', 'Please enter both email and password.');
-      console.log('Login unsuccessfully:'); // 🧩 Add this
       return;
     }
 
     try {
+      console.log("🔐 Logging in:", email);
+
+      // 1️⃣ Login → get token
       const response = await axios.post('http://192.168.1.222:5001/api/auth/login', {
         email,
         password,
       });
+
       const { token } = response.data;
+
+      // 2️⃣ Save token
       await AsyncStorage.setItem('userToken', token);
-      console.log('💾 Token saved successfully:', token); // 🧩 Add this
-      console.log('✅ Login successful, navigating to Home...');
-      navigation.replace('Home');
+      console.log("💾 Token stored:", token);
+
+      // 3️⃣ Fetch user details (for role)
+      const me = await axios.get('http://192.168.1.222:5001/api/auth/me', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      console.log("👤 Logged-in user:", me.data);
+
+// 4️⃣ ROUTE BASED ON ROLE (case-insensitive)
+if (me.data.role?.toUpperCase() === "ADMIN") {
+  console.log("🛡️ Admin detected → redirecting to AdminDashboardScreen");
+
+  navigation.reset({
+    index: 0,
+    routes: [{ name: "AdminDashboardScreen" }],
+  });
+
+} else {
+  console.log("👤 Borrower detected → redirecting to Home");
+
+  navigation.reset({
+    index: 0,
+    routes: [{ name: "Home" }],
+  });
+}
+
+
     } catch (error: any) {
+      console.log("❌ Login Error:", error.response?.data || error.message);
       Alert.alert('Login Failed', error.response?.data?.error || 'Invalid credentials');
     }
   };
 
+  // =================================================================
+  //                      UI / RENDER
+  // =================================================================
   return (
     <LinearGradient
       colors={['#169AF9', '#37AAF2']}
@@ -63,7 +97,8 @@ const LoginScreen = ({ navigation }: LoginScreenProps) => {
       style={styles.gradientBackground}
     >
       <SafeAreaView style={styles.container}>
-        {/* 🔵 Header Section with circular logo wrapper */}
+
+        {/* Blue header */}
         <View style={styles.blueHeader}>
           <View style={styles.logoWrapper}>
             <Image
@@ -73,11 +108,11 @@ const LoginScreen = ({ navigation }: LoginScreenProps) => {
           </View>
         </View>
 
-        {/* ⚪ White content container */}
+        {/* White form container */}
         <View style={styles.formContainer}>
           <Text style={styles.title}>Welcome Back</Text>
 
-          {/* Email Input */}
+          {/* Email */}
           <TextInput
             style={styles.input}
             placeholder="Email Address"
@@ -88,7 +123,7 @@ const LoginScreen = ({ navigation }: LoginScreenProps) => {
             onChangeText={setEmail}
           />
 
-          {/* Password Input */}
+          {/* Password */}
           <TextInput
             style={styles.input}
             placeholder="Password"
@@ -120,6 +155,10 @@ const LoginScreen = ({ navigation }: LoginScreenProps) => {
 
 export default LoginScreen;
 
+// =================================================================
+//                         STYLE SHEET
+// =================================================================
+
 const styles = StyleSheet.create({
   gradientBackground: {
     flex: 1,
@@ -131,18 +170,16 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-start',
   },
 
-  // 🔵 Gradient header with responsive height
   blueHeader: {
     width: '100%',
-    height: height * 0.18, // 📱 dynamic height based on screen
+    height: height * 0.18,
     justifyContent: 'flex-end',
     alignItems: 'center',
-    borderBottomLeftRadius: scale(60), // 📏 scaled for width
+    borderBottomLeftRadius: scale(60),
     borderBottomRightRadius: scale(60),
     overflow: 'hidden',
   },
 
-  // ⚪ Logo circular background wrapper
   logoWrapper: {
     backgroundColor: '#FFFFFF',
     borderRadius: scale(60),
@@ -152,25 +189,23 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     shadowOffset: { width: 0, height: 4 },
     position: 'relative',
-    marginTop: verticalScale(-40), // 📏 moves up proportionally
+    marginTop: verticalScale(-40),
   },
 
-  // 🖼️ Logo image itself
   logo: {
-    width: scale(230), // 📱 resizes according to screen width
-    height: verticalScale(180), // 📏 resizes according to height
+    width: scale(230),
+    height: verticalScale(180),
     resizeMode: 'contain',
     marginHorizontal: scale(20),
     bottom: verticalScale(-30),
   },
 
-  // ⚪ White box container for the form
   formContainer: {
     position: 'absolute',
-    bottom: verticalScale(20), // 📏 spacing adapts to height
+    bottom: verticalScale(20),
     backgroundColor: '#fff',
     width: '95%',
-    height: height * 0.75, // 📱 dynamic vertical height
+    height: height * 0.75,
     borderRadius: scale(30),
     alignItems: 'center',
     paddingHorizontal: scale(30),
@@ -182,15 +217,13 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: -2 },
   },
 
-  // 🟦 Title text — responsive font
   title: {
-    fontSize: moderateScale(26), // 📏 scales smoothly
+    fontSize: moderateScale(26),
     fontWeight: '700',
     color: '#007BFF',
     marginBottom: verticalScale(30),
   },
 
-  // ✏️ Input fields
   input: {
     width: '100%',
     height: verticalScale(50),
@@ -202,7 +235,6 @@ const styles = StyleSheet.create({
     fontSize: moderateScale(16),
   },
 
-  // 🔵 Login button
   button: {
     width: '50%',
     backgroundColor: '#0A9EFA',
@@ -214,21 +246,18 @@ const styles = StyleSheet.create({
     borderColor: '#0367A6',
   },
 
-  // 🔵 Button text
   buttonText: {
     color: '#fff',
     fontSize: moderateScale(16),
     fontWeight: '700',
   },
 
-  // 🧾 Footer text (“Don’t have an account?”)
   footerText: {
     marginTop: verticalScale(100),
     color: '#444',
-    fontSize: moderateScale(14), // 📏 responsive
+    fontSize: moderateScale(14),
   },
 
-  // 🟩 Sign Up button
   signupButton: {
     width: '40%',
     backgroundColor: '#0A9EFA',

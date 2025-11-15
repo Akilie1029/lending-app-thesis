@@ -7,6 +7,15 @@ plugins {
     id("com.facebook.react") version "0.81.0" apply false
 }
 
+// ======================================================================
+// 🌟 GLOBAL ANDROID SDK CONFIGURATION (Fix for react-native-svg, reanimated, etc.)
+// ======================================================================
+ext {
+    compileSdkVersion = 36
+    targetSdkVersion  = 36
+    minSdkVersion     = 24
+}
+
 task clean(type: Delete) {
     delete rootProject.buildDir
 }
@@ -16,8 +25,10 @@ subprojects {
     afterEvaluate { project ->
         if (project.hasProperty("android")) {
             project.android {
+                compileSdkVersion rootProject.ext.compileSdkVersion
                 defaultConfig {
-                    minSdkVersion 24
+                    minSdkVersion rootProject.ext.minSdkVersion
+                    targetSdkVersion rootProject.ext.targetSdkVersion
                 }
             }
         }
