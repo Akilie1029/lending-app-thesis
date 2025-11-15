@@ -63,11 +63,11 @@ const LoginScreen = ({ navigation }: LoginScreenProps) => {
 
 // 4️⃣ ROUTE BASED ON ROLE (case-insensitive)
 if (me.data.role?.toUpperCase() === "ADMIN") {
-  console.log("🛡️ Admin detected → redirecting to AdminDashboardScreen");
+  console.log("🛡️ Admin detected → redirecting to AdminDrawer");
 
   navigation.reset({
     index: 0,
-    routes: [{ name: "AdminDashboardScreen" }],
+    routes: [{ name: "AdminDrawer" }],
   });
 
 } else {

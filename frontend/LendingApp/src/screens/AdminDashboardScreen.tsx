@@ -12,6 +12,7 @@ import axios from "axios";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { PieChart } from "react-native-chart-kit";
 import { useNavigation } from "@react-navigation/native";
+import AdminHeader from "../components/AdminHeader";
 
 
 const { width } = Dimensions.get("window");
@@ -145,7 +146,8 @@ const AdminDashboardScreen = () => {
   return (
     <ScrollView style={styles.container}>
       {/* Header */}
-      <View style={styles.header}><Text style={styles.headerTitle}>Admin Dashboard</Text></View>
+      <AdminHeader title="Admin Dashboard" />
+
 
       {/* Top counters */}
       <View style={styles.row}>
@@ -168,19 +170,33 @@ const AdminDashboardScreen = () => {
         </View>
       </View>
 
-      {/* Payment overview */}
-      <View style={styles.panel}>
-        <Text style={styles.panelTitle}>Payment Overview</Text>
-        <View style={styles.row}>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.legend}>Collectibles Today — ₱ {stats.paymentOverview.collectiblesToday.toLocaleString()}</Text>
-            <Text style={styles.legend}>Actual Payments — ₱ {stats.paymentOverview.actualPayments.toLocaleString()}</Text>
-          </View>
-          <PieChart data={paymentPieData} width={140} height={140} accessor="amount" backgroundColor="transparent" paddingLeft="0" center={[0, 0]} absolute chartConfig={{ color: (o) => `rgba(0,0,0,${o})` }} />
-        </View>
+{/* Payment overview */}
+<View style={styles.panel}>
+  <Text style={styles.panelTitle}>Payment Overview</Text>
+  <View style={styles.row}>
+    <View style={{ flex: 1 }}>
+      <Text style={styles.legend}>Collectibles Today — ₱ {stats.paymentOverview.collectiblesToday.toLocaleString()}</Text>
+      <Text style={styles.legend}>Actual Payments — ₱ {stats.paymentOverview.actualPayments.toLocaleString()}</Text>
+    </View>
+
+    <PieChart
+      data={paymentPieData}
+      width={140}
+      height={140}
+      accessor="amount"
+      backgroundColor="transparent"
+      paddingLeft="0"
+      center={[0, 0]}
+      absolute
+      chartConfig={{ color: (o) => `rgba(0,0,0,${o})` }}
+    />
+  </View>
+</View>   {/* ✅ FIX: added this missing closing tag */}
+
 
 {/* Pending actions */}
 <View style={{ marginTop: 10 }}>
+
   
   {/* Navigate to Loan Approvals */}
   <TouchableOpacity

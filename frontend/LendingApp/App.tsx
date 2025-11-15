@@ -2,74 +2,51 @@ import React from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import {
   createNativeStackNavigator,
-  NativeStackScreenProps,
 } from '@react-navigation/native-stack';
 import { createDrawerNavigator } from '@react-navigation/drawer';
 import { View, Text, StyleSheet } from 'react-native';
 
-// --- 🧩 Import User Screens ---
+// User Screens
 import LoginScreen from './src/screens/LoginScreen';
 import SignupScreen from './src/screens/SignupScreen';
 import HomeScreen from './src/screens/HomeScreen';
 import LoanApplicationScreen from './src/screens/LoanApplicationScreen';
 import LoanDetailsScreen from './src/screens/LoanDetailsScreen';
 
-// --- 🧩 Import Admin Screens ---
-import AdminDashboardScreen from './src/screens/AdminDashboardScreen';
-import AdminLoanApprovalScreen from './src/screens/AdminLoanApprovalScreen';
-import AdminDisbursementScreen from './src/screens/AdminDisbursementScreen';
-import AdminBorrowerListScreen from './src/screens/AdminBorrowerListScreen';
-import AdminLoansListScreen from './src/screens/AdminLoansListScreen';
-import AdminCollectionsScreen from './src/screens/AdminCollectionsScreen';
-
-// --- 🧩 Import Admin Drawer ---
+// Admin Drawer Navigator
 import AdminDrawerNavigator from './src/navigation/AdminDrawerNavigator';
 
-// --- 🧩 Import User Drawer ---
+// User Drawer Component
 import CustomDrawer from './src/components/CustomDrawer';
 
-// ======================================================================
-// 📋 Type Definitions
-// ======================================================================
-
+// Drawer types (User drawer only)
 export type DrawerParamList = {
   Dashboard: undefined;
   'Loan Application': undefined;
   Settings: undefined;
 };
 
-// Stack routes (global)
+// Stack Routes (Root navigation)
 export type RootStackParamList = {
   Login: undefined;
   Register: undefined;
 
-  // User main shell
+  // USER SHELL
   Home: undefined;
 
   // Loan
   'Loan Details': { loanId: string } | undefined;
   'Loan Application': undefined;
 
-  // Admin shell
+  // ADMIN SHELL
   AdminDrawer: undefined;
-
-  // Admin stack-only screens
-  AdminLoanApprovalScreen: undefined;
-  AdminDisbursementScreen: undefined;
-  AdminBorrowerListScreen: undefined;
-  AdminLoansListScreen: undefined;
-  AdminCollectionsScreen: undefined;
 };
 
-// ======================================================================
-// 🧭 Navigator Setup
-// ======================================================================
+// Navigators
 const Stack = createNativeStackNavigator<RootStackParamList>();
 const Drawer = createDrawerNavigator<DrawerParamList>();
 
-// ======================================================================
-// 🧩 USER Drawer Navigator
-// ======================================================================
+// USER Drawer Navigator
 function DrawerNavigator() {
   return (
     <Drawer.Navigator
@@ -101,9 +78,7 @@ function DrawerNavigator() {
   );
 }
 
-// ======================================================================
-// ⚙️ Placeholder Screen
-// ======================================================================
+// Settings placeholder
 function PlaceholderScreen() {
   return (
     <View style={styles.placeholderContainer}>
@@ -112,34 +87,26 @@ function PlaceholderScreen() {
   );
 }
 
-// ======================================================================
-// 🚀 MAIN App Navigator (Stack)
-// ======================================================================
+// ROOT NAVIGATION
 function App() {
   return (
     <NavigationContainer>
       <Stack.Navigator initialRouteName="Login" screenOptions={{ headerShown: false }}>
 
-        {/* Authentication */}
+        {/* AUTH */}
         <Stack.Screen name="Login" component={LoginScreen} />
         <Stack.Screen name="Register" component={SignupScreen} />
 
-        {/* USER Drawer */}
+        {/* USER MAIN */}
         <Stack.Screen name="Home" component={DrawerNavigator} />
 
-        {/* Loan */}
+        {/* LOAN */}
         <Stack.Screen name="Loan Details" component={LoanDetailsScreen} />
         <Stack.Screen name="Loan Application" component={LoanApplicationScreen} />
 
-        {/* ADMIN Drawer */}
+        {/* ADMIN MAIN */}
         <Stack.Screen name="AdminDrawer" component={AdminDrawerNavigator} />
 
-        {/* ADMIN Supporting Screens */}
-        <Stack.Screen name="AdminLoanApprovalScreen" component={AdminLoanApprovalScreen} />
-        <Stack.Screen name="AdminDisbursementScreen" component={AdminDisbursementScreen} />
-        <Stack.Screen name="AdminBorrowerListScreen" component={AdminBorrowerListScreen} />
-        <Stack.Screen name="AdminLoansListScreen" component={AdminLoansListScreen} />
-        <Stack.Screen name="AdminCollectionsScreen" component={AdminCollectionsScreen} />
       </Stack.Navigator>
     </NavigationContainer>
   );
@@ -147,9 +114,7 @@ function App() {
 
 export default App;
 
-// ======================================================================
-// 🎨 Styles
-// ======================================================================
+// Styles
 const styles = StyleSheet.create({
   placeholderContainer: {
     flex: 1,
