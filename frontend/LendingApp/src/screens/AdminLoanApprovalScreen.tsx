@@ -34,7 +34,7 @@ export default function AdminLoanApprovalScreen({ navigation }) {
   }, []);
 
   // ============================================================
-  // 📌 LOAD PENDING LOANS
+  // 📌 LOAD PENDING LOANS  (FIXED ROUTE)
   // ============================================================
   const loadLoans = async () => {
     setLoading(true);
@@ -43,7 +43,7 @@ export default function AdminLoanApprovalScreen({ navigation }) {
       const token = await AsyncStorage.getItem("userToken");
 
       const res = await axios.get(
-        "http://192.168.1.222:5001/api/admin/loans/pending",
+        "http://192.168.1.222:5001/api/admin/loan-approvals",
         {
           headers: { Authorization: `Bearer ${token}` },
         }
@@ -62,7 +62,7 @@ export default function AdminLoanApprovalScreen({ navigation }) {
   // 📌 APPROVE LOAN
   // ============================================================
   const approveLoan = async (loanId: string) => {
-    Alert.alert("Confirm Approval", "Approve this loan?", [
+    Alert.alert("Confirm", "Approve this loan?", [
       { text: "Cancel", style: "cancel" },
       {
         text: "Approve",
@@ -73,18 +73,16 @@ export default function AdminLoanApprovalScreen({ navigation }) {
             const token = await AsyncStorage.getItem("userToken");
 
             await axios.post(
-              `http://192.168.1.222:5001/api/admin/loans/${loanId}/approve`,
+              `http://192.168.1.222:5001/api/admin/loan-approvals/${loanId}/approve`,
               {},
               { headers: { Authorization: `Bearer ${token}` } }
             );
 
-            Alert.alert("Success", "Loan approved.");
-
-            // remove from list
-            setLoans((cur) => cur.filter((l) => l.id !== loanId));
+            Alert.alert("Success", "Loan approved successfully.");
+            loadLoans(); // Reload
           } catch (err) {
             console.error("Approve error:", err);
-            Alert.alert("Error", "Failed to approve loan.");
+            Alert.alert("Error", "Failed to approve loan");
           } finally {
             setProcessing((p) => ({ ...p, [loanId]: false }));
           }
@@ -94,45 +92,48 @@ export default function AdminLoanApprovalScreen({ navigation }) {
   };
 
   // ============================================================
-  // 📌 REJECT LOAN
+  // 📌 REJECT LOAN  (FIXED ROUTE)
   // ============================================================
-  const rejectLoan = async (loanId: string) => {
-    Alert.prompt(
-      "Reject Loan",
-      "Optional note:",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Reject",
-          onPress: async (note) => {
-            try {
-              setProcessing((p) => ({ ...p, [loanId]: true }));
+const rejectLoan = async (loanId: string) => {
+  Alert.alert(
+    "Reject Loan",
+    "Are you sure you want to reject this loan?",
+    [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Reject",
+        style: "destructive",
+        onPress: async () => {
+          try {
+            setProcessing((p) => ({ ...p, [loanId]: true }));
 
-              const token = await AsyncStorage.getItem("userToken");
+            const token = await AsyncStorage.getItem("userToken");
 
-              await axios.post(
-                `http://192.168.1.222:5001/api/admin/loans/${loanId}/reject`,
-                { note: note || "" },
-                { headers: { Authorization: `Bearer ${token}` } }
-              );
+            await axios.post(
+              `http://192.168.1.222:5001/api/admin/loan-approvals/${loanId}/reject`,
+              { note: "" }, // no note for now (Android-safe)
+              { headers: { Authorization: `Bearer ${token}` } }
+            );
 
-              Alert.alert("Rejected", "Loan has been rejected.");
-              setLoans((cur) => cur.filter((l) => l.id !== loanId));
-            } catch (err) {
-              console.error("Reject error:", err);
-              Alert.alert("Error", "Failed to reject loan.");
-            } finally {
-              setProcessing((p) => ({ ...p, [loanId]: false }));
-            }
-          },
+            Alert.alert("Rejected", "Loan has been rejected.");
+
+            // Remove from list instantly
+            setLoans((cur) => cur.filter((l) => l.id !== loanId));
+          } catch (err) {
+            console.error("Reject error:", err);
+            Alert.alert("Error", "Failed to reject loan.");
+          } finally {
+            setProcessing((p) => ({ ...p, [loanId]: false }));
+          }
         },
-      ],
-      "plain-text"
-    );
-  };
+      },
+    ]
+  );
+};
+
 
   // ============================================================
-  // 📌 Render Each Loan
+  // 📌 Render Loan Card
   // ============================================================
   const renderLoan = ({ item }: { item: LoanRow }) => (
     <View style={styles.card}>
@@ -205,7 +206,7 @@ export default function AdminLoanApprovalScreen({ navigation }) {
   }
 
   // ============================================================
-  // 📌 List
+  // 📌 List UI
   // ============================================================
   return (
     <FlatList

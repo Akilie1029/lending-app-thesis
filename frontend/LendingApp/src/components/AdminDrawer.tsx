@@ -50,7 +50,7 @@ export default function AdminDrawer(props: DrawerContentComponentProps) {
         {/* Dashboard */}
         <TouchableOpacity
           style={styles.menuItem}
-          onPress={() => navigation.navigate("AdminDashboardScreen")}
+          onPress={() => navigation.navigate("AdminDashboard")}
         >
           <MaterialCommunityIcons name="view-dashboard" size={22} color="#1F87E5" />
           <Text style={styles.menuText}>Dashboard</Text>
