@@ -1,4 +1,5 @@
 // src/screens/AdminLoanApprovalScreen.tsx
+
 import React, { useEffect, useState } from "react";
 import {
   View,
@@ -12,6 +13,9 @@ import {
 import axios from "axios";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { format } from "date-fns";
+
+// ✅ ADDED — new header component (back arrow + blue bar)
+import SmallHeader from "../components/SmallHeader";
 
 type LoanRow = {
   id: string;
@@ -34,7 +38,7 @@ export default function AdminLoanApprovalScreen({ navigation }) {
   }, []);
 
   // ============================================================
-  // 📌 LOAD PENDING LOANS  (FIXED ROUTE)
+  // 📌 LOAD PENDING LOANS
   // ============================================================
   const loadLoans = async () => {
     setLoading(true);
@@ -79,7 +83,7 @@ export default function AdminLoanApprovalScreen({ navigation }) {
             );
 
             Alert.alert("Success", "Loan approved successfully.");
-            loadLoans(); // Reload
+            loadLoans();
           } catch (err) {
             console.error("Approve error:", err);
             Alert.alert("Error", "Failed to approve loan");
@@ -92,13 +96,10 @@ export default function AdminLoanApprovalScreen({ navigation }) {
   };
 
   // ============================================================
-  // 📌 REJECT LOAN  (FIXED ROUTE)
+  // 📌 REJECT LOAN
   // ============================================================
-const rejectLoan = async (loanId: string) => {
-  Alert.alert(
-    "Reject Loan",
-    "Are you sure you want to reject this loan?",
-    [
+  const rejectLoan = async (loanId: string) => {
+    Alert.alert("Reject Loan", "Are you sure you want to reject this loan?", [
       { text: "Cancel", style: "cancel" },
       {
         text: "Reject",
@@ -111,13 +112,12 @@ const rejectLoan = async (loanId: string) => {
 
             await axios.post(
               `http://192.168.1.222:5001/api/admin/loan-approvals/${loanId}/reject`,
-              { note: "" }, // no note for now (Android-safe)
+              { note: "" },
               { headers: { Authorization: `Bearer ${token}` } }
             );
 
             Alert.alert("Rejected", "Loan has been rejected.");
 
-            // Remove from list instantly
             setLoans((cur) => cur.filter((l) => l.id !== loanId));
           } catch (err) {
             console.error("Reject error:", err);
@@ -127,10 +127,8 @@ const rejectLoan = async (loanId: string) => {
           }
         },
       },
-    ]
-  );
-};
-
+    ]);
+  };
 
   // ============================================================
   // 📌 Render Loan Card
@@ -147,7 +145,9 @@ const rejectLoan = async (loanId: string) => {
       <Text style={styles.purpose}>{item.purpose}</Text>
 
       <View style={styles.metaRow}>
-        <Text style={styles.meta}>Term: {item.repayment_term_months} months</Text>
+        <Text style={styles.meta}>
+          Term: {item.repayment_term_months} months
+        </Text>
         <Text style={styles.meta}>
           Applied: {format(new Date(item.created_at), "MMM d, yyyy")}
         </Text>
@@ -200,21 +200,31 @@ const rejectLoan = async (loanId: string) => {
   if (!loans.length) {
     return (
       <View style={styles.center}>
-        <Text style={{ color: "#666" }}>No pending loans.</Text>
+        {/* ✅ ADDED — header even on empty state */}
+        <SmallHeader title="Loan Approval" />
+
+        <Text style={{ color: "#666", marginTop: 20 }}>
+          No pending loans.
+        </Text>
       </View>
     );
   }
 
   // ============================================================
-  // 📌 List UI
+  // 📌 Main UI with Header (NEW)
   // ============================================================
   return (
-    <FlatList
-      contentContainerStyle={{ padding: 12, paddingBottom: 48 }}
-      data={loans}
-      keyExtractor={(i) => i.id}
-      renderItem={renderLoan}
-    />
+    <View style={{ flex: 1 }}>
+      {/* ✅ ADDED — new blue header with back arrow */}
+      <SmallHeader title="Loan Approval" />
+
+      <FlatList
+        contentContainerStyle={{ padding: 12, paddingBottom: 48 }}
+        data={loans}
+        keyExtractor={(i) => i.id}
+        renderItem={renderLoan}
+      />
+    </View>
   );
 }
 
@@ -233,7 +243,11 @@ const styles = StyleSheet.create({
   purpose: { color: "#444", marginTop: 8, marginBottom: 6 },
   metaRow: { flexDirection: "row", justifyContent: "space-between" },
   meta: { color: "#666", fontSize: 12 },
-  actions: { flexDirection: "row", justifyContent: "space-between", marginTop: 12 },
+  actions: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginTop: 12,
+  },
   button: {
     flex: 1,
     paddingVertical: 10,

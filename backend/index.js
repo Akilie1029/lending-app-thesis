@@ -12,10 +12,14 @@ const authMiddleware = require('./authMiddleware');
 const adminMiddleware = require('./adminMiddleware');
 
 // --- Modular Routes ---
-const loanRoutes = require('./routes/loanRoutes'); // User loan actions
-const adminRoutes = require('./routes/admin'); // Admin dashboard (stats)
-const adminLoanApprovals = require('./routes/adminLoanApprovals'); // NEW
-const adminDisbursement = require('./routes/adminDisbursement');
+const loanRoutes = require('./routes/loanRoutes');                // User loan actions
+const adminRoutes = require('./routes/admin');                    // Admin dashboard (stats)
+const adminLoanApprovals = require('./routes/adminLoanApprovals');// Admin approving/rejecting
+const adminDisbursement = require('./routes/adminDisbursement');  // Admin disbursement
+const adminApprovedLoans = require("./routes/adminApprovedLoans");// Admin list approved loans
+
+// ⭐ NEW — Borrower Loan Dashboard route
+const loanDashboardRoutes = require('./routes/loanDashboard');    // ⭐ ADDED
 
 
 const app = express();
@@ -115,30 +119,34 @@ app.get('/api/auth/me', authMiddleware, async (req, res) => {
 
 
 // =================================================================
-//                        USER (BORROWER) ROUTES
+//                     USER (BORROWER) ROUTES
 // =================================================================
 
-app.use('/api/loans', loanRoutes);
+app.use('/api/loans', loanRoutes);  // loan apply, list, etc.
+
+
+// =================================================================
+//                     ⭐ BORROWER DASHBOARD ROUTES
+// =================================================================
+// This powers the borrower's home screen (Amount Due, Withdraw, Summary)
+// ⭐ This is the section you asked for.
+app.use('/api/users', loanDashboardRoutes);   // ⭐ ADDED
 
 
 // =================================================================
 //                           ADMIN ROUTES
 // =================================================================
 
-// Admin Dashboard (stats)
-app.use('/api/admin', adminRoutes);
+app.use('/api/admin', adminRoutes);          // dashboard stats
+app.use('/api/admin', adminLoanApprovals);   // approve/reject
+app.use('/api/admin', adminDisbursement);    // disburse
+app.use('/api/admin', adminApprovedLoans);   // list approved loans
 
-// Admin Loan Approvals (approve/reject)
-app.use('/api/admin', adminLoanApprovals);
-
-// Admin Loan Disbursement
-app.use("/api/admin", adminDisbursement);
 
 // =================================================================
-//                      USER DASHBOARD ENDPOINTS
+//                      USER BALANCE & TRANSACTIONS
 // =================================================================
 
-// --- User Balance ---
 app.get('/api/users/balance', authMiddleware, async (req, res) => {
   try {
     const userId = req.user.id;

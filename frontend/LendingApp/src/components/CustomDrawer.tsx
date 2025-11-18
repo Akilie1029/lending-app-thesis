@@ -94,53 +94,52 @@ const CustomDrawer = (props: any) => {
         contentContainerStyle={styles.drawerScroll}
       >
         <View style={styles.drawerItems}>
-          {/* 🏠 Dashboard → Replace to Home */}
-          <TouchableOpacity
-            style={styles.menuItem}
-            onPress={() => {
-              props.navigation.replace('Home');
-            }}
-          >
-            <Icon name="view-dashboard-outline" size={40} color="#169AF9" />
-            <Text style={styles.menuText}>Dashboard</Text>
-          </TouchableOpacity>
 
-          {/* 📝 Loan Application */}
-          <TouchableOpacity
-            style={styles.menuItem}
-            onPress={() => props.navigation.navigate('Loan Application')}
-          >
-            <Icon name="file-plus-outline" size={40} color="#169AF9" />
-            <Text style={styles.menuText}>Loan Application</Text>
-          </TouchableOpacity>
+  <TouchableOpacity
+    style={styles.menuItem}
+    onPress={() => {
+      props.navigation.navigate('Dashboard');
+      props.navigation.closeDrawer();
+    }}
+  >
+    <Icon name="view-dashboard-outline" size={40} color="#169AF9" />
+    <Text style={styles.menuText}>Dashboard</Text>
+  </TouchableOpacity>
 
-          {/* 📄 My Loan */}
-          <TouchableOpacity
-            style={styles.menuItem}
-            onPress={() => props.navigation.navigate('My Loan')}
-          >
-            <Icon name="file-document-outline" size={40} color="#169AF9" />
-            <Text style={styles.menuText}>My Loan</Text>
-          </TouchableOpacity>
+  <TouchableOpacity
+    style={styles.menuItem}
+    onPress={() => props.navigation.navigate('Loan Application')}
+  >
+    <Icon name="file-plus-outline" size={40} color="#169AF9" />
+    <Text style={styles.menuText}>Loan Application</Text>
+  </TouchableOpacity>
+  
+  <TouchableOpacity
+    style={styles.menuItem}
+    onPress={() => props.navigation.navigate('My Loan')}
+  >
+    <Icon name="file-document-outline" size={40} color="#169AF9" />
+    <Text style={styles.menuText}>My Loan</Text>
+  </TouchableOpacity>
 
-          {/* 🧾 Payment History */}
-          <TouchableOpacity
-            style={styles.menuItem}
-            onPress={() => props.navigation.navigate('Payment History')}
-          >
-            <Icon name="calendar-month-outline" size={40} color="#169AF9" />
-            <Text style={styles.menuText}>Payment History</Text>
-          </TouchableOpacity>
+  <TouchableOpacity
+    style={styles.menuItem}
+    onPress={() => props.navigation.navigate('Payment History')}
+  >
+    <Icon name="calendar-month-outline" size={40} color="#169AF9" />
+    <Text style={styles.menuText}>Payment History</Text>
+  </TouchableOpacity>
 
-          {/* ⚙️ Account Settings */}
-          <TouchableOpacity
-            style={styles.menuItem}
-            onPress={() => props.navigation.navigate('Account Settings')}
-          >
-            <Icon name="cog-outline" size={40} color="#169AF9" />
-            <Text style={styles.menuText}>Account Settings</Text>
-          </TouchableOpacity>
-        </View>
+  <TouchableOpacity
+    style={styles.menuItem}
+    onPress={() => props.navigation.navigate('Account Settings')}
+  >
+    <Icon name="cog-outline" size={40} color="#169AF9" />
+    <Text style={styles.menuText}>Settings</Text>
+  </TouchableOpacity>
+
+</View>
+
       </DrawerContentScrollView>
 
       {/* ===== Bottom Section ===== */}

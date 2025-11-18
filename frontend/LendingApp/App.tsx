@@ -12,6 +12,11 @@ import SignupScreen from './src/screens/SignupScreen';
 import HomeScreen from './src/screens/HomeScreen';
 import LoanApplicationScreen from './src/screens/LoanApplicationScreen';
 import LoanDetailsScreen from './src/screens/LoanDetailsScreen';
+import PaymentHistoryScreen from './src/screens/PaymentHistoryScreen';
+import MyLoanScreen from './src/screens/MyLoanScreen';
+import AccountSettingsScreen from './src/screens/AccountSettingsScreen';
+import HelpSupportScreen from './src/screens/HelpSupportScreen';
+
 
 // Admin Drawer Navigator
 import AdminDrawerNavigator from './src/navigation/AdminDrawerNavigator';
@@ -23,6 +28,10 @@ import CustomDrawer from './src/components/CustomDrawer';
 export type DrawerParamList = {
   Dashboard: undefined;
   'Loan Application': undefined;
+  'Payment History': undefined;
+  'My Loan': undefined;
+  'Account Settings': undefined;
+  'Help Support': undefined;
   Settings: undefined;
 };
 
@@ -70,13 +79,33 @@ function DrawerNavigator() {
       />
 
       <Drawer.Screen
-        name="Settings"
-        component={PlaceholderScreen}
-        options={{ drawerLabel: 'Settings' }}
+        name="Payment History"
+        component={PaymentHistoryScreen}
+        options={{ drawerLabel: 'Payment History' }}
       />
+
+      <Drawer.Screen
+        name="My Loan"
+        component={MyLoanScreen}
+        options={{ drawerLabel: 'My Loan' }}
+      />
+
+      <Drawer.Screen
+        name="Account Settings"
+        component={AccountSettingsScreen}
+        options={{ drawerLabel: 'Account Settings' }}
+      />
+
+      <Drawer.Screen
+        name="Help Support"
+        component={HelpSupportScreen}
+        options={{ drawerLabel: 'Help & Support' }}
+      />
+
     </Drawer.Navigator>
   );
 }
+
 
 // Settings placeholder
 function PlaceholderScreen() {
@@ -103,9 +132,13 @@ function App() {
         {/* LOAN */}
         <Stack.Screen name="Loan Details" component={LoanDetailsScreen} />
         <Stack.Screen name="Loan Application" component={LoanApplicationScreen} />
+        <Stack.Screen name="Payment History" component={PaymentHistoryScreen} />
 
         {/* ADMIN MAIN */}
         <Stack.Screen name="AdminDrawer" component={AdminDrawerNavigator} />
+
+        
+
 
       </Stack.Navigator>
     </NavigationContainer>

@@ -6,25 +6,34 @@ const adminMiddleware = require('../adminMiddleware'); // ensure this is correct
 const authMiddleware = require('../authMiddleware'); // require auth too
 
 // GET /api/admin/loan-approvals
-// Returns loans that are pending approval
 router.get('/loan-approvals', authMiddleware, adminMiddleware, async (req, res) => {
+  console.log("🔥 [DEBUG] /loan-approvals was called");
+  console.log("🔥 [DEBUG] User:", req.user);
+
   try {
-    // Accept a few common textual statuses to be robust
     const q = `
       SELECT l.id, l.user_id, u.full_name, l.amount_requested, l.purpose,
              l.repayment_term_months, l.status, l.created_at
       FROM loans l
       LEFT JOIN users u ON u.id = l.user_id
-      WHERE LOWER(l.status) IN ('pending', 'pending_approval', 'pendingapproval')
+      WHERE LOWER(l.status) = 'pending'
       ORDER BY l.created_at DESC
     `;
+
+    console.log("🔥 [DEBUG] Running query...");
+
     const result = await db.query(q);
+
+    console.log("🔥 [DEBUG] Query returned rows:", result.rows.length);
+
     res.json(result.rows);
   } catch (err) {
-    console.error('❌ GET /admin/loan-approvals error:', err);
-    res.status(500).json({ message: 'Server error' });
+    console.error("❌ BACKEND ERROR in /loan-approvals:", err);
+    res.status(500).json({ message: "Server error", error: err.message });
   }
 });
+
+
 
 // POST /api/admin/loan-approvals/:id/approve
 router.post('/loan-approvals/:id/approve', authMiddleware, adminMiddleware, async (req, res) => {
