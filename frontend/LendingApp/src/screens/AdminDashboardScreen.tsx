@@ -10,44 +10,22 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import axios from "axios";
-import AsyncStorage from "@react-native-async-storage/async-storage";
+
 import { BarChart, LineChart } from "react-native-chart-kit";
 import { useNavigation, useFocusEffect } from "@react-navigation/native";
+
 import AdminHeader from "../components/AdminHeader";
 import RadialRing from "../components/RadialRing";
+import adminDashboardService from "../services/adminDashboardService";
 
 const { width } = Dimensions.get("window");
 const CONTENT_PADDING = 12;
-const SMALL_PIE_SIZE = 110;
-const BIG_CHART_WIDTH = Math.min(width - CONTENT_PADDING * 2 - 24, 720);
-
-type DashboardResponse = {
-  borrowerCount: number;
-  activeLoanCount: number;
-  rejectedCount: number;
-  loanStatusDistribution: { unpaidAmount: number; paidAmount: number; overdueAmount: number };
-  paymentOverview: { collectiblesToday: number; actualPayments: number };
-  pendingLoanApproval: number;
-  pendingDisbursement: number;
-  totalDisbursedLoan: number;
-  loansAtRisk?: number;
-  weeklyCollections?: number[]; // length 7
-  dailyRepayments?: number[]; // sparkline
-  upcomingPayments?: Array<{ id: string; borrower: string; due: string; amount: number }>;
-};
-
-const chartConfig = {
-  backgroundGradientFrom: "#ffffff",
-  backgroundGradientTo: "#ffffff",
-  color: (opacity = 1) => `rgba(17, 24, 39, ${opacity})`,
-  labelColor: (opacity = 1) => `rgba(120, 130, 140, ${opacity})`,
-  strokeWidth: 2,
-};
+const PANEL_HORIZONTAL_PADDING = 16;
+const BIG_CHART_WIDTH = Math.min(width - CONTENT_PADDING * 2 - 24, 920); // increased max so 12 bars can fit
 
 export default function AdminDashboardScreen() {
   const [loading, setLoading] = useState(true);
-  const [stats, setStats] = useState<DashboardResponse | null>(null);
+  const [stats, setStats] = useState<any>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const navigation = useNavigation<any>();
@@ -59,67 +37,30 @@ export default function AdminDashboardScreen() {
     }, [])
   );
 
-  useEffect(() => {
-    if (stats) {
-      Animated.timing(fadeAnim, {
-        toValue: 1,
-        duration: 400,
-        useNativeDriver: true,
-      }).start();
-    } else {
-      fadeAnim.setValue(0);
-    }
-  }, [stats, fadeAnim]);
-
-  // fetch
   const loadStats = async () => {
     try {
       setLoading(true);
       setErrorMsg(null);
       setStats(null);
 
-      const token = await AsyncStorage.getItem("userToken");
-      if (!token) {
-        setErrorMsg("No auth token found. Please login again.");
-        setLoading(false);
-        return;
-      }
-
-      const res = await axios.get("http://192.168.1.222:5001/api/admin/dashboard-stats", {
-        headers: { Authorization: `Bearer ${token}` },
-        timeout: 10000,
-      });
-
-      // safe defaults for missing arrays
-      const normalized: DashboardResponse = {
-        ...res.data,
-        weeklyCollections: res.data.weeklyCollections || generatePlaceholderWeekly(res.data.totalDisbursedLoan),
-        dailyRepayments: res.data.dailyRepayments || generatePlaceholderDaily(res.data.totalDisbursedLoan),
-        loansAtRisk: res.data.loansAtRisk ?? Math.max(0, Math.floor((res.data.pendingDisbursement || 0) / 2)),
-        upcomingPayments: res.data.upcomingPayments || [],
-      };
-
-      setStats(normalized);
-      setLoading(false);
-    } catch (err: any) {
-      console.error("Dashboard load error:", err);
+      const ui = await adminDashboardService.getDashboardStats({ sparkPoints: 12, smoothing: true });
+      setStats(ui);
+    } catch (err) {
+      console.error("Dashboard load failed:", err);
       setErrorMsg("Failed to load dashboard. Check connection.");
+    } finally {
       setLoading(false);
     }
   };
 
-  // placeholders
-  function generatePlaceholderWeekly(total: number) {
-    const base = Math.max(0, Math.round((total || 0) / 28));
-    return Array.from({ length: 7 }, (_, i) => Math.max(0, base + Math.round(Math.sin(i + 1) * base * 0.5)));
-  }
+  useEffect(() => {
+    if (stats) {
+      Animated.timing(fadeAnim, { toValue: 1, duration: 400, useNativeDriver: true }).start();
+    } else {
+      fadeAnim.setValue(0);
+    }
+  }, [stats]);
 
-  function generatePlaceholderDaily(total: number) {
-    const base = Math.max(0, Math.round((total || 0) / 70));
-    return Array.from({ length: 12 }, (_, i) => Math.max(0, base + Math.round(Math.cos(i + 1) * base * 0.4)));
-  }
-
-  // UI states
   if (loading) {
     return (
       <View style={styles.center}>
@@ -148,28 +89,10 @@ export default function AdminDashboardScreen() {
     );
   }
 
-  // helpers
-  const totalForRings =
-    stats.loanStatusDistribution.unpaidAmount +
-    stats.loanStatusDistribution.paidAmount +
-    stats.loanStatusDistribution.overdueAmount;
+  // helper: format peso with sign first
+  const fmtPeso = (n: number) => `₱ ${n.toLocaleString()}`;
 
-  const pctNum = (value: number, total: number) => {
-    if (!total) return 0;
-    return Math.round((value / total) * 100);
-  };
-
-  const totalPayment = stats.paymentOverview.collectiblesToday + stats.paymentOverview.actualPayments;
-
-  // charts sizes
-  const bigChartWidth = Math.min(BIG_CHART_WIDTH, width - CONTENT_PADDING * 2 - 20);
-
-  // weekly labels
-  const weeklyLabels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].slice(0, (stats.weeklyCollections || []).length);
-
-  // spark labels
-  const sparkLabels = (stats.dailyRepayments || []).map((_, i) => `${i + 1}`);
-
+  /* ------------------ UI ------------------ */
   return (
     <ScrollView style={styles.container}>
       <AdminHeader title="Admin Dashboard" />
@@ -191,30 +114,28 @@ export default function AdminDashboardScreen() {
         <View style={[styles.statCard, styles.rejectedCard]}>
           <Text style={[styles.statLabel, { color: "#fff" }]}>Rejected</Text>
           <Text style={[styles.statValue, { color: "#fff" }]}>{stats.rejectedCount}</Text>
-          <Text style={[styles.statFoot, { color: "rgba(255,255,255,0.9)" }]}>Declined apps</Text>
+          <Text style={[styles.statFoot, { color: "#fff" }]}>Declined apps</Text>
         </View>
       </View>
 
-      {/* Loan status radial rings (3 in one row) */}
+      {/* Loan status radial rings */}
       <View style={styles.panel}>
         <Text style={styles.panelTitle}>Loan Status</Text>
         <View style={styles.ringRow}>
           <RadialRing
-            progress={pctNum(stats.loanStatusDistribution.paidAmount, totalForRings)}
+            progress={stats.ringPercent.paidPct}
             label="Paid"
             amount={stats.loanStatusDistribution.paidAmount}
             colors={{ start: "#19d06b", end: "#00c853" }}
           />
-
           <RadialRing
-            progress={pctNum(stats.loanStatusDistribution.unpaidAmount, totalForRings)}
+            progress={stats.ringPercent.unpaidPct}
             label="Unpaid"
             amount={stats.loanStatusDistribution.unpaidAmount}
             colors={{ start: "#4facfe", end: "#00c6fb" }}
           />
-
           <RadialRing
-            progress={pctNum(stats.loanStatusDistribution.overdueAmount, totalForRings)}
+            progress={stats.ringPercent.overduePct}
             label="Overdue"
             amount={stats.loanStatusDistribution.overdueAmount}
             colors={{ start: "#ff6b6b", end: "#ff3b30" }}
@@ -222,110 +143,160 @@ export default function AdminDashboardScreen() {
         </View>
       </View>
 
-      {/* Payment overview: micro area + amount summary */}
+      {/* Payment Overview (4-week, expected vs actual) */}
       <View style={styles.panel}>
-        <Text style={styles.panelTitle}>Payment Overview</Text>
+        <Text style={styles.panelTitle}>Payment Overview (Last 4 Weeks)</Text>
 
-        <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+        <LineChart
+          data={stats.paymentsVsCollectiblesChart}
+          width={BIG_CHART_WIDTH}
+          height={160}
+          withDots={false}
+          withInnerLines={false} // remove grid
+          withOuterLines={false}
+          withVerticalLabels={true}
+          withHorizontalLabels={true}
+          yAxisSuffix="₱"
+          chartConfig={{
+            backgroundGradientFrom: "#fff",
+            backgroundGradientTo: "#fff",
+            color: (opacity = 1) => `rgba(0,0,0,${opacity})`,
+            labelColor: (opacity = 1) => `rgba(110,110,110,${opacity})`,
+            strokeWidth: 2,
+          }}
+          bezier
+          style={{ marginBottom: 12 }}
+        />
+
+        <View style={styles.row}>
           <View style={{ flex: 1 }}>
-            <Text style={styles.legend}>🟦 {pctNum(stats.paymentOverview.collectiblesToday, totalPayment)} Collectibles — ₱ {stats.paymentOverview.collectiblesToday.toLocaleString()}</Text>
-            <Text style={styles.legend}>🟩 {pctNum(stats.paymentOverview.actualPayments, totalPayment)} Payments — ₱ {stats.paymentOverview.actualPayments.toLocaleString()}</Text>
+            <Text style={[styles.legend, { color: "#0A74FF" }]}>🟦 Expected (Collectibles)</Text>
+            <Text style={styles.amountText}>{fmtPeso(Math.round(stats.paymentsVsCollectiblesChart.datasets[0].data.reduce((a: number, b: number) => a + b, 0) / 4))}</Text>
           </View>
 
-          <View style={{ width: 140, alignItems: "center" }}>
-            {/* small sparkline-like area (line chart) */}
+          <View style={{ flex: 1, alignItems: "flex-end" }}>
+            <Text style={[styles.legend, { color: "#00C853" }]}>🟩 Actual Payments</Text>
+            <Text style={[styles.amountText, { color: "#00C853" }]}>{fmtPeso(Math.round(stats.paymentsVsCollectiblesChart.datasets[1].data.reduce((a: number, b: number) => a + b, 0) / 4))}</Text>
+          </View>
+        </View>
+      </View>
+
+      {/* Collections (7-day) */}
+      <View style={styles.panel}>
+        <Text style={styles.panelTitle}>Collections — Last 7 Days</Text>
+
+        <BarChart
+          data={stats.collectionsChart}
+          width={BIG_CHART_WIDTH}
+          height={170}
+          fromZero
+          withInnerLines={false} // no grid
+          withOuterLines={false}
+          yAxisSuffix="" // formatting will be done manually in labels
+          yAxisInterval={2000}
+          chartConfig={{
+            backgroundGradientFrom: "#fff",
+            backgroundGradientTo: "#fff",
+            color: (opacity = 1) => `rgba(10,132,255,${opacity})`,
+            labelColor: (opacity = 1) => `rgba(110,110,110,${opacity})`,
+          }}
+          showValuesOnTopOfBars={false} // remove numbers on bars
+          style={{ borderRadius: 8 }}
+        />
+
+        <View style={{ height: 8 }} />
+
+        {/* explanatory row showing min/max Y axis */}
+        <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+          <Text style={[styles.legend, { fontSize: 12 }]}>₱ 0</Text>
+          <Text style={[styles.legend, { fontSize: 12 }]}>₱ 2,000</Text>
+          <Text style={[styles.legend, { fontSize: 12 }]}>₱ 4,000</Text>
+          <Text style={[styles.legend, { fontSize: 12 }]}>₱ 6,000</Text>
+          <Text style={[styles.legend, { fontSize: 12 }]}>₱ 8,000</Text>
+          <Text style={[styles.legend, { fontSize: 12 }]}>₱ 10,000</Text>
+        </View>
+      </View>
+
+      {/* Cashflow Overview (12-week) */}
+      <View style={styles.panel}>
+        <Text style={styles.panelTitle}>Cashflow Overview — Last 12 Weeks</Text>
+
+        {/* BarChart for repayments vs disbursements */}
+        <View style={{ position: "relative" }}>
+          <BarChart
+            data={stats.cashflowChart}
+            width={BIG_CHART_WIDTH}
+            height={200}
+            fromZero
+            withInnerLines={false}
+            withOuterLines={false}
+            chartConfig={{
+              backgroundGradientFrom: "#fff",
+              backgroundGradientTo: "#fff",
+              color: (opacity = 1) => `rgba(0,0,0,${opacity})`,
+              labelColor: (opacity = 1) => `rgba(110,110,110,${opacity})`,
+            }}
+            showValuesOnTopOfBars={false}
+            style={{ borderRadius: 8 }}
+          />
+
+          {/* Overlay net line using LineChart positioned absolutely */}
+          <View style={{ position: "absolute", left: 0, top: 0 }}>
             <LineChart
               data={{
-                labels: sparkLabels.length ? sparkLabels : stats.dailyRepayments?.map((_, i) => `${i + 1}`) || [],
-                datasets: [{ data: stats.dailyRepayments || [] }],
+                labels: stats.cashflowChart.labels,
+                datasets: [{ data: stats.raw12WeekRepayments.map((r: number, i: number) => r - (stats.raw12WeekDisbursements[i] || 0)) }],
               }}
-              width={140}
-              height={90}
-              withDots={false}
+              width={BIG_CHART_WIDTH}
+              height={200}
+              withDots={true}
               withInnerLines={false}
               withOuterLines={false}
               withVerticalLabels={false}
               withHorizontalLabels={false}
               chartConfig={{
-                backgroundGradientFrom: "#ffffff",
-                backgroundGradientTo: "#ffffff",
-                color: (opacity = 1) => `rgba(0,200,83,${opacity})`,
-                propsForDots: { r: "3" },
+                backgroundGradientFrom: "transparent",
+                backgroundGradientTo: "transparent",
+                color: (opacity = 1) => `rgba(34,34,34,${opacity})`,
+                labelColor: () => `rgba(0,0,0,0)`,
               }}
               bezier
-              style={{ paddingRight: 0 }}
+              style={{ backgroundColor: "transparent", marginLeft: 0 }}
             />
           </View>
         </View>
+
+        <View style={{ marginTop: 8 }}>
+          <Text style={[styles.legend, { color: "#0A74FF" }]}>🔵 Repayments</Text>
+          <Text style={[styles.legend, { color: "#FF3B30" }]}>🔴 Disbursements</Text>
+          <Text style={[styles.legend, { color: "#222", marginTop: 4 }]}>— Net cashflow (line)</Text>
+        </View>
       </View>
 
-      {/* Collections last 7 days (Bar chart) */}
+      {/* Payment Behavior (on-time vs late, 4 weeks) */}
       <View style={styles.panel}>
-        <Text style={styles.panelTitle}>Collections — Last 7 days</Text>
-        <Animated.View style={{ opacity: fadeAnim }}>
-          <BarChart
-            data={{
-              labels: weeklyLabels.length ? weeklyLabels : ["D1", "D2", "D3", "D4", "D5", "D6", "D7"],
-              datasets: [{ data: stats.weeklyCollections || [0, 0, 0, 0, 0, 0, 0] }],
-            }}
-            width={bigChartWidth}
-            height={170}
-            chartConfig={{
-              ...chartConfig,
-              color: (opacity = 1) => `rgba(10,132,255,${opacity})`,
-            }}
-            fromZero
-            showValuesOnTopOfBars
-            style={{ borderRadius: 8 }}
-          />
+        <Text style={styles.panelTitle}>Payment Behavior — On-Time vs Late (4 weeks)</Text>
 
-          <View style={{ height: 10 }} />
+        <BarChart
+          data={stats.onTimeLateChart}
+          width={Math.min(BIG_CHART_WIDTH, width - CONTENT_PADDING * 2 - 24)}
+          height={180}
+          fromZero
+          withInnerLines={false}
+          withOuterLines={false}
+          chartConfig={{
+            backgroundGradientFrom: "#fff",
+            backgroundGradientTo: "#fff",
+            color: (opacity = 1) => `rgba(0,0,0,${opacity})`,
+            labelColor: (opacity = 1) => `rgba(110,110,110,${opacity})`,
+          }}
+          showValuesOnTopOfBars={false}
+          style={{ borderRadius: 8 }}
+        />
 
-          <Text style={[styles.panelTitle, { fontSize: 15 }]}>Repayments (sparkline)</Text>
-
-          <LineChart
-            data={{
-              labels: sparkLabels.length ? sparkLabels : stats.dailyRepayments?.map((_, i) => `${i + 1}`) || [],
-              datasets: [{ data: stats.dailyRepayments || [] }],
-            }}
-            width={bigChartWidth}
-            height={110}
-            chartConfig={{
-              ...chartConfig,
-              color: (opacity = 1) => `rgba(0, 200, 83, ${opacity})`,
-              propsForDots: { r: "3" },
-            }}
-            withDots={false}
-            withShadow={true}
-            withInnerLines={false}
-            bezier
-            fromZero
-            style={{ marginVertical: 6, borderRadius: 8 }}
-          />
-        </Animated.View>
-      </View>
-
-      {/* Business insights */}
-      <View style={styles.panel}>
-        <Text style={styles.panelTitle}>Business Insights</Text>
-        <View style={styles.row}>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.legend}>⚠️ Loans at risk — {stats.loansAtRisk ?? 0}</Text>
-            <Text style={styles.legend}>📈 Total Disbursed — ₱ {stats.totalDisbursedLoan.toLocaleString()}</Text>
-          </View>
-
-          <View style={{ flex: 1 }}>
-            <Text style={styles.legend}>🔔 Upcoming Payments</Text>
-            {stats.upcomingPayments && stats.upcomingPayments.length ? (
-              stats.upcomingPayments.slice(0, 3).map((p) => (
-                <Text key={p.id} style={[styles.legend, { fontSize: 13 }]}>
-                  • {p.borrower} — ₱ {p.amount.toLocaleString()} ({p.due})
-                </Text>
-              ))
-            ) : (
-              <Text style={[styles.legend, { fontSize: 13, color: "#666" }]}>No upcoming payments</Text>
-            )}
-          </View>
+        <View style={{ marginTop: 8 }}>
+          <Text style={[styles.legend, { color: "#007AFF" }]}>🔵 On-time (count)</Text>
+          <Text style={[styles.legend, { color: "#FF3B30" }]}>🔴 Late (count)</Text>
         </View>
       </View>
 
@@ -350,6 +321,8 @@ export default function AdminDashboardScreen() {
     </ScrollView>
   );
 }
+
+/* --------------------- Styles ---------------------- */
 
 const styles = StyleSheet.create({
   container: { backgroundColor: "#f3f6fa", padding: CONTENT_PADDING },
@@ -381,14 +354,35 @@ const styles = StyleSheet.create({
 
   row: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
 
-  pieWrapper: { width: SMALL_PIE_SIZE, height: SMALL_PIE_SIZE, justifyContent: "center", alignItems: "center" },
+  amountText: { marginTop: 6, fontSize: 20, fontWeight: "900", color: "#0071b2" },
 
-  badgeButton: { backgroundColor: "#FFC107", padding: 12, borderRadius: 10, marginTop: 10, flexDirection: "row", justifyContent: "space-between" },
+  badgeButton: {
+    backgroundColor: "#FFC107",
+    padding: 12,
+    borderRadius: 10,
+    marginTop: 10,
+    flexDirection: "row",
+    justifyContent: "space-between",
+  },
   badgeText: { fontSize: 15, fontWeight: "700" },
-  badgeCount: { backgroundColor: "#ff3b30", paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8 },
+
+  badgeCount: {
+    backgroundColor: "#ff3b30",
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+  },
+
   badgeCountText: { color: "#fff", fontWeight: "800" },
   badgeCountTextRed: { color: "#ff3b30", fontWeight: "800" },
 
-  retryButton: { marginTop: 12, backgroundColor: "#0A9EFA", paddingHorizontal: 18, paddingVertical: 8, borderRadius: 8 },
+  retryButton: {
+    marginTop: 12,
+    backgroundColor: "#0A9EFA",
+    paddingHorizontal: 18,
+    paddingVertical: 8,
+    borderRadius: 8,
+  },
+
   retryText: { color: "#fff", fontWeight: "700" },
 });

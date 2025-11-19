@@ -99,8 +99,7 @@ export default function RadialRing({
 const styles = StyleSheet.create({
   wrapper: {
     alignItems: "center",
-    width: 110,
-    marginHorizontal: 6,
+    width: 80,
   },
   centerText: {
     position: "absolute",
