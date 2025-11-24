@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback } from "react";
 import {
   View,
   Text,
@@ -7,80 +7,63 @@ import {
   ScrollView,
   Dimensions,
   ActivityIndicator,
-} from 'react-native';
-import LinearGradient from 'react-native-linear-gradient';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import axios from 'axios';
-import { useFocusEffect } from '@react-navigation/native';
-import { HomeScreenProps } from '../../App';
+} from "react-native";
+import LinearGradient from "react-native-linear-gradient";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import axios from "axios";
+import { useFocusEffect } from "@react-navigation/native";
+import { HomeScreenProps } from "../../App";
 
-const { width } = Dimensions.get('window');
+const { width } = Dimensions.get("window");
 const scale = (size: number) => (width / 375) * size;
 
-const API_BASE = 'http://192.168.1.222:5001/api';
+const API_BASE = "http://192.168.1.222:5001/api";
 
 const HomeScreen = ({ navigation }: HomeScreenProps) => {
   const [user, setUser] = useState<any>(null);
-  const [balance, setBalance] = useState<number>(0);
   const [transactions, setTransactions] = useState<any[]>([]);
-  const [loan, setLoan] = useState<any>(null);
+  const [activeLoan, setActiveLoan] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // --- 🔁 Fetch all user data ---
   const fetchData = async () => {
     try {
-      const token = await AsyncStorage.getItem('userToken');
+      const token = await AsyncStorage.getItem("userToken");
       if (!token) {
-        setError('No token found');
+        setError("No token found");
         setLoading(false);
         return;
       }
 
       const headers = { Authorization: `Bearer ${token}` };
 
-      const [userRes, balRes, txRes, loanRes] = await Promise.all([
+      const [userRes, txRes, activeLoanRes] = await Promise.all([
         axios.get(`${API_BASE}/auth/me`, { headers }),
-        axios.get(`${API_BASE}/users/balance`, { headers }),
         axios.get(`${API_BASE}/transactions/my`, { headers }),
-        axios.get(`${API_BASE}/loans/my-loans`, { headers }),
+        axios.get(`${API_BASE}/loans/my-active`, { headers }),
       ]);
 
       setUser(userRes.data);
-      setBalance(Number(balRes.data.balance) || 0);
-      setTransactions(txRes.data);
-
-      const activeLoan =
-        loanRes.data.find((l: any) => l.status === 'approved') || loanRes.data[0];
-      setLoan(activeLoan || null);
+      setTransactions(Array.isArray(txRes.data) ? txRes.data : []);
+      setActiveLoan(activeLoanRes.data?.id ? activeLoanRes.data : null);
     } catch (error: any) {
-      console.error('❌ Fetch failed:', error.message);
-      setError('Failed to load dashboard data');
+      console.error("❌ Fetch failed:", error.message);
+      setError("Failed to load dashboard data");
     } finally {
       setLoading(false);
     }
   };
 
-  // Initial load
   useEffect(() => {
     fetchData();
   }, []);
 
-  // --- 🔄 Refresh automatically when screen is focused ---
   useFocusEffect(
     useCallback(() => {
       fetchData();
     }, [])
   );
 
-  // Redirect if no token
-  useEffect(() => {
-    if (error === 'No token found') {
-      navigation.replace('Login');
-    }
-  }, [error]);
-
-  // Loading state
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
@@ -89,164 +72,111 @@ const HomeScreen = ({ navigation }: HomeScreenProps) => {
     );
   }
 
-  // Error state
-  if (error && error !== 'No token found') {
-    return (
-      <View style={styles.loadingContainer}>
-        <Text style={{ color: 'red', fontSize: 16 }}>Error: {error}</Text>
-        <TouchableOpacity
-          onPress={() => {
-            setError(null);
-            setLoading(true);
-            fetchData();
-          }}
-        >
-          <Text style={{ color: '#0A9EFA', marginTop: 10 }}>Retry</Text>
-        </TouchableOpacity>
-      </View>
-    );
-  }
-
-  const hasActiveLoan = !!loan;
+  /** ───────────────────────────────────────────────
+   *  IF NO ACTIVE LOAN
+   * ─────────────────────────────────────────────── */
+  const noActiveLoan = !activeLoan;
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 40 }}>
       {/* ===== HEADER ===== */}
-      <LinearGradient colors={['#169AF9', '#37AAF2']} style={styles.header}>
+      <LinearGradient colors={["#169AF9", "#37AAF2"]} style={styles.header}>
         <View style={styles.headerTopRow}>
           <View style={styles.leftSection}>
             <TouchableOpacity onPress={() => navigation.openDrawer()} style={styles.menuContainer}>
               <Text style={styles.menuIcon}>☰</Text>
               <Text style={styles.headerSubtitle}>Welcome Back</Text>
             </TouchableOpacity>
-            <Text style={styles.headerName}>{user?.full_name || 'User'}</Text>
+            <Text style={styles.headerName}>{user?.full_name}</Text>
           </View>
           <Text style={styles.bellIcon}>🔔</Text>
         </View>
       </LinearGradient>
 
-      {/* ===== BALANCE CARD ===== */}
+      {/* ======================================================
+        BALANCE CARD
+        Shows:
+        - Apply Loan (if NO active loan)
+        - Daily Payment + Next Due Date + Make Payment (if active)
+      ====================================================== */}
       <View style={styles.balanceCard}>
-        <View style={styles.balanceCenter}>
-          <Text style={styles.balanceAmount}>
-            ₱ {balance.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-          </Text>
-          <Text style={styles.balanceLabel}>Total Available Balance</Text>
-        </View>
+        {noActiveLoan ? (
+          <>
+            <Text style={styles.balanceLabel}>No active loan</Text>
 
-        {/* ✅ Unified button logic */}
-        <TouchableOpacity
-          style={[
-            styles.primaryButton,
-            { width: '100%', backgroundColor: balance <= 0 ? '#0077C8' : '#0077C8' },
-          ]}
-          onPress={() => {
-            if (!loan || loan.status === 'rejected') navigation.navigate('Loan Application');
-            else if (loan.status === 'pending') return;
-            else if (balance <= 0) navigation.navigate('Loan Application');
-            else navigation.navigate('Withdraw');
-          }}
-          disabled={loan?.status === 'pending'}
-        >
-          <Text style={styles.primaryButtonText}>
-            {loan
-              ? loan.status === 'pending'
-                ? 'Pending Approval'
-                : balance <= 0
-                ? 'Apply Loan'
-                : 'Withdraw'
-              : 'Apply Loan'}
-          </Text>
-        </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.primaryButton, { width: "100%" }]}
+              onPress={() => navigation.navigate("Loan Application")}
+            >
+              <Text style={styles.primaryButtonText}>Apply for Loan</Text>
+            </TouchableOpacity>
+          </>
+        ) : (
+          <>
+            <Text style={styles.dailyPaymentText}>
+              Daily Payment: ₱ {activeLoan.daily_payment?.toLocaleString()}
+            </Text>
+
+            <Text style={styles.dueDateText}>
+              Next Due Date: {new Date(activeLoan.latest_due_date).toLocaleDateString()}
+            </Text>
+
+            <TouchableOpacity
+              style={[styles.primaryButton, { width: "100%" }]}
+              onPress={() => navigation.navigate("RepayLoan", { loan: activeLoan })}
+            >
+              <Text style={styles.primaryButtonText}>Make a Payment</Text>
+            </TouchableOpacity>
+          </>
+        )}
       </View>
 
-{/* ===== LOAN STATUS SECTION ===== */}
-{loan ? (
-  <>
-    <View style={styles.sectionHeader}>
-      <Text style={styles.sectionTitle}>Loan Status</Text>
-    </View>
-
-    <View style={styles.loanCard}>
-      {/* --- Row: Amount (left) | Date (right) --- */}
-      <View style={[styles.loanRow, { alignItems: 'center' }]}>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.loanAmount}>
-            ₱{' '}
-            {Number(loan.amount_requested || 0).toLocaleString(undefined, {
-              minimumFractionDigits: 2,
-            })}
-          </Text>
-          <Text style={styles.loanAmountLabel}>
-            {loan.status === 'approved'
-              ? 'Approved Loan Amount'
-              : loan.status === 'pending'
-              ? 'Pending Loan Request'
-              : loan.status === 'rejected'
-              ? 'Rejected Loan Request'
-              : 'Loan Amount'}
-          </Text>
-        </View>
-
-        <View style={{ alignItems: 'flex-end', marginLeft: 10 }}>
-          <Text style={{ fontSize: 14, fontWeight: '700', color: '#000' }}>
-            {loan.status === 'approved' && loan.next_due_date
-              ? new Date(loan.next_due_date).toLocaleDateString()
-              : new Date(loan.created_at).toLocaleDateString()}
-          </Text>
-          <Text style={{ color: '#666', fontSize: 12 }}>
-            {loan.status === 'approved' ? 'Next Due Date' : 'Date Submitted'}
-          </Text>
-        </View>
+      {/* ======================================================
+        LOAN STATUS SECTION
+      ====================================================== */}
+      <View style={styles.sectionHeader}>
+        <Text style={styles.sectionTitle}>Loan Status</Text>
       </View>
 
-      {/* --- Fixed Row: Make Payment + View Details --- */}
-      <View style={[styles.buttonRow, { marginTop: 10 }]}>
-        {/* 🟦 Make Payment (always visible but disabled when pending or rejected) */}
-        <TouchableOpacity
-          style={[
-            styles.primaryButton,
-            {
-              width: '48%',
-              backgroundColor:
-                loan.status === 'approved' ? '#0A9EFA' : '#C7C7C7', // gray if not active
-            },
-          ]}
-          disabled={loan.status !== 'approved'}
-          onPress={() => {
-            if (loan.status === 'approved') navigation.navigate('RepayLoan', { loan });
-          }}
-        >
-          <Text
-            style={[
-              styles.primaryButtonText,
-              { color: loan.status === 'approved' ? '#fff' : '#666' },
-            ]}
+      {noActiveLoan ? (
+        <View style={styles.loanCard}>
+          <Text style={{ fontSize: 16, color: "#444", textAlign: "center" }}>
+            You currently have no active loan.
+          </Text>
+          <Text style={{ fontSize: 14, color: "#777", textAlign: "center", marginTop: 5 }}>
+            Apply now to get started!
+          </Text>
+        </View>
+      ) : (
+        <View style={styles.loanCard}>
+          <View style={styles.loanRow}>
+            <View>
+              <Text style={styles.loanAmount}>
+                ₱ {Number(activeLoan.principal).toLocaleString()}
+              </Text>
+              <Text style={styles.loanAmountLabel}>Approved Loan Amount</Text>
+            </View>
+
+            <View style={{ alignItems: "flex-end" }}>
+              <Text style={styles.loanAmount}>
+                {new Date(activeLoan.disbursed_at).toLocaleDateString()}
+              </Text>
+              <Text style={styles.loanAmountLabel}>Date Approved</Text>
+            </View>
+          </View>
+
+          <TouchableOpacity
+            style={[styles.secondaryButton, { width: "100%", marginTop: 12 }]}
+            onPress={() => navigation.navigate("Loan Details", { loan: activeLoan })}
           >
-            Make a Payment
-          </Text>
-        </TouchableOpacity>
+            <Text style={styles.secondaryButtonText}>View Details</Text>
+          </TouchableOpacity>
+        </View>
+      )}
 
-        {/* 📄 View Details (always active) */}
-        <TouchableOpacity
-          style={[styles.secondaryButton, { width: '48%' }]}
-          onPress={() => navigation.navigate('Loan Details', { loan })}
-        >
-          <Text style={styles.secondaryButtonText}>View Details</Text>
-        </TouchableOpacity>
-      </View>
-    </View>
-  </>
-) : (
-  // 💬 No Loan Case
-  <View style={{ alignItems: 'center', marginVertical: 20 }}>
-    <Text style={{ color: '#777', fontSize: 16 }}>No loan found</Text>
-  </View>
-)}
-
-
-
-      {/* ===== RECENT TRANSACTIONS ===== */}
+      {/* ======================================================
+        RECENT TRANSACTIONS
+      ====================================================== */}
       <View style={styles.sectionHeader}>
         <Text style={styles.sectionTitle}>Recent Transactions</Text>
         <Text style={styles.seeAll}>See all</Text>
@@ -254,32 +184,26 @@ const HomeScreen = ({ navigation }: HomeScreenProps) => {
 
       <View style={styles.transactionsContainer}>
         {transactions.length === 0 ? (
-          <Text style={{ textAlign: 'center', color: '#999', padding: 10 }}>
+          <Text style={{ textAlign: "center", color: "#999", padding: 10 }}>
             No recent transactions found
           </Text>
         ) : (
-          transactions.map((tx, i) => {
-            const typeLower = tx.type.toLowerCase();
-            const icon = typeLower.includes('loan payment') ? '⬆️' : '⬇️';
-            const iconColor = typeLower.includes('loan payment') ? '#FF3B30' : '#4CD964';
-
-            return (
-              <View key={i} style={styles.transactionCard}>
-                <View style={styles.transactionLeft}>
-                  <Text style={[styles.transactionIcon, { color: iconColor }]}>{icon}</Text>
-                  <View>
-                    <Text style={styles.transactionType}>{tx.type}</Text>
-                    <Text style={styles.transactionDate}>
-                      {new Date(tx.created_at).toLocaleDateString()}
-                    </Text>
-                  </View>
+          transactions.map((tx, i) => (
+            <View key={i} style={styles.transactionCard}>
+              <View style={styles.transactionLeft}>
+                <Text style={styles.transactionIcon}>⬇️</Text>
+                <View>
+                  <Text style={styles.transactionType}>{tx.type}</Text>
+                  <Text style={styles.transactionDate}>
+                    {new Date(tx.created_at).toLocaleDateString()}
+                  </Text>
                 </View>
-                <Text style={styles.transactionAmount}>
-                  ₱ {Number(tx.amount).toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                </Text>
               </View>
-            );
-          })
+              <Text style={styles.transactionAmount}>
+                ₱ {Number(tx.amount).toLocaleString()}
+              </Text>
+            </View>
+          ))
         )}
       </View>
     </ScrollView>
@@ -287,6 +211,10 @@ const HomeScreen = ({ navigation }: HomeScreenProps) => {
 };
 
 export default HomeScreen;
+
+/* === KEEP ALL YOUR EXISTING STYLES BELOW === */
+
+
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f6f7fb', marginTop: 20 },

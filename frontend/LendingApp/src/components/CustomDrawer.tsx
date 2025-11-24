@@ -12,36 +12,58 @@ import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
 
-const API_BASE = 'http://192.168.1.222:5001/api'; // ✅ same API base as HomeScreen
+const API_BASE = 'http://192.168.1.222:5001/api';
 
 const CustomDrawer = (props: any) => {
   const [user, setUser] = useState<any>(null);
+  const [hasActiveLoan, setHasActiveLoan] = useState<boolean>(false);
+  const [hasAnyLoan, setHasAnyLoan] = useState<boolean>(false);
 
-  // ✅ Fetch user info from /auth/me
   useEffect(() => {
-    const fetchUser = async () => {
+    const fetchUserAndLoans = async () => {
       try {
         const token = await AsyncStorage.getItem('userToken');
         if (!token) {
-          console.log('⚠️ No token found — redirecting to Login');
           props.navigation.replace('Login');
           return;
         }
 
-        const response = await axios.get(`${API_BASE}/auth/me`, {
-          headers: { Authorization: `Bearer ${token}` },
+        const headers = { Authorization: `Bearer ${token}` };
+
+        // Fetch user
+        const userRes = await axios.get(`${API_BASE}/auth/me`, { headers });
+        setUser(userRes.data);
+
+        // Fetch active loan
+        const activeLoanRes = await axios.get(`${API_BASE}/loans/my-active`, {
+          headers,
         });
 
-        setUser(response.data);
+        const activeLoan = activeLoanRes.data;
+
+        // Active loan condition (active/pending)
+        if (activeLoan && (activeLoan.status === 'active' || activeLoan.status === 'pending')) {
+          setHasActiveLoan(true);
+        } else {
+          setHasActiveLoan(false);
+        }
+
+        // Fetch ALL loans to determine if My Loan should be visible
+        const allLoansRes = await axios.get(`${API_BASE}/loans/my-loans`, {
+          headers,
+        });
+
+        setHasAnyLoan(allLoansRes.data.length > 0);
+
       } catch (error) {
-        console.error('❌ Failed to load user info:', error);
+        console.error('❌ Failed to load user/loan info:', error);
       }
     };
 
-    fetchUser();
+    fetchUserAndLoans();
   }, []);
 
-  // ✅ Logout logic
+  // Logout
   const handleLogout = () => {
     Alert.alert(
       'Confirm Logout',
@@ -56,7 +78,7 @@ const CustomDrawer = (props: any) => {
               await AsyncStorage.removeItem('userToken');
               props.navigation.reset({
                 index: 0,
-                routes: [{ name: 'Login' }], // ✅ Replace stack with Login
+                routes: [{ name: 'Login' }],
               });
             } catch (error) {
               console.error('Logout failed:', error);
@@ -69,13 +91,11 @@ const CustomDrawer = (props: any) => {
 
   return (
     <View style={{ flex: 1, backgroundColor: '#169AF9' }}>
-      {/* ===== Header Section ===== */}
+      
+      {/* HEADER */}
       <View style={styles.header}>
-        <Image
-          source={require('../../assets/logo.png')} // 🟦 Local KAURta logo
-          style={styles.logo}
-          resizeMode="contain"
-        />
+        <Image source={require('../../assets/logo.png')} style={styles.logo} />
+
         <Image
           source={{
             uri:
@@ -84,65 +104,77 @@ const CustomDrawer = (props: any) => {
           }}
           style={styles.avatar}
         />
+
         <Text style={styles.userName}>{user?.full_name || 'Loading...'}</Text>
         <Text style={styles.userEmail}>{user?.email || 'Please wait...'}</Text>
       </View>
 
-      {/* ===== Drawer Menu ===== */}
+      {/* MENU */}
       <DrawerContentScrollView
         {...props}
         contentContainerStyle={styles.drawerScroll}
       >
         <View style={styles.drawerItems}>
 
-  <TouchableOpacity
-    style={styles.menuItem}
-    onPress={() => {
-      props.navigation.navigate('Dashboard');
-      props.navigation.closeDrawer();
-    }}
-  >
-    <Icon name="view-dashboard-outline" size={40} color="#169AF9" />
-    <Text style={styles.menuText}>Dashboard</Text>
-  </TouchableOpacity>
+          {/* Dashboard */}
+          <TouchableOpacity
+            style={styles.menuItem}
+            onPress={() => {
+              props.navigation.navigate('Dashboard');
+              props.navigation.closeDrawer();
+            }}
+          >
+            <Icon name="view-dashboard-outline" size={40} color="#169AF9" />
+            <Text style={styles.menuText}>Dashboard</Text>
+          </TouchableOpacity>
 
-  <TouchableOpacity
-    style={styles.menuItem}
-    onPress={() => props.navigation.navigate('Loan Application')}
-  >
-    <Icon name="file-plus-outline" size={40} color="#169AF9" />
-    <Text style={styles.menuText}>Loan Application</Text>
-  </TouchableOpacity>
-  
-  <TouchableOpacity
-    style={styles.menuItem}
-    onPress={() => props.navigation.navigate('My Loan')}
-  >
-    <Icon name="file-document-outline" size={40} color="#169AF9" />
-    <Text style={styles.menuText}>My Loan</Text>
-  </TouchableOpacity>
+          {/* Loan Application — HIDDEN if active/pending loan */}
+          {!hasActiveLoan && (
+            <TouchableOpacity
+              style={styles.menuItem}
+              onPress={() => {
+                props.navigation.navigate('Loan Application');
+                props.navigation.closeDrawer();
+              }}
+            >
+              <Icon name="file-plus-outline" size={40} color="#169AF9" />
+              <Text style={styles.menuText}>Loan Application</Text>
+            </TouchableOpacity>
+          )}
 
-  <TouchableOpacity
-    style={styles.menuItem}
-    onPress={() => props.navigation.navigate('Payment History')}
-  >
-    <Icon name="calendar-month-outline" size={40} color="#169AF9" />
-    <Text style={styles.menuText}>Payment History</Text>
-  </TouchableOpacity>
+          {/* My Loan — SHOW only if user has ANY loans */}
+          {hasAnyLoan && (
+            <TouchableOpacity
+              style={styles.menuItem}
+              onPress={() => props.navigation.navigate('My Loan')}
+            >
+              <Icon name="file-document-outline" size={40} color="#169AF9" />
+              <Text style={styles.menuText}>My Loan</Text>
+            </TouchableOpacity>
+          )}
 
-  <TouchableOpacity
-    style={styles.menuItem}
-    onPress={() => props.navigation.navigate('Account Settings')}
-  >
-    <Icon name="cog-outline" size={40} color="#169AF9" />
-    <Text style={styles.menuText}>Settings</Text>
-  </TouchableOpacity>
+          {/* Payment History */}
+          <TouchableOpacity
+            style={styles.menuItem}
+            onPress={() => props.navigation.navigate('Payment History')}
+          >
+            <Icon name="calendar-month-outline" size={40} color="#169AF9" />
+            <Text style={styles.menuText}>Payment History</Text>
+          </TouchableOpacity>
 
-</View>
+          {/* Settings */}
+          <TouchableOpacity
+            style={styles.menuItem}
+            onPress={() => props.navigation.navigate('Account Settings')}
+          >
+            <Icon name="cog-outline" size={40} color="#169AF9" />
+            <Text style={styles.menuText}>Settings</Text>
+          </TouchableOpacity>
 
+        </View>
       </DrawerContentScrollView>
 
-      {/* ===== Bottom Section ===== */}
+      {/* Bottom Actions */}
       <View style={styles.bottomSection}>
         <TouchableOpacity
           style={styles.bottomItem}
@@ -165,7 +197,7 @@ const CustomDrawer = (props: any) => {
 
 export default CustomDrawer;
 
-// (Your same styles — untouched)
+/* styles unchanged */
 const styles = StyleSheet.create({
   header: {
     alignItems: 'center',
@@ -185,15 +217,8 @@ const styles = StyleSheet.create({
     borderColor: '#0367A6',
     marginBottom: 10,
   },
-  userName: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#fff',
-  },
-  userEmail: {
-    fontSize: 13,
-    color: '#f0f0f0',
-  },
+  userName: { fontSize: 18, fontWeight: '700', color: '#fff' },
+  userEmail: { fontSize: 13, color: '#f0f0f0' },
   drawerScroll: {
     backgroundColor: '#fff',
     marginHorizontal: 15,
@@ -203,6 +228,7 @@ const styles = StyleSheet.create({
     borderWidth: 3,
     borderColor: '#169AF9',
   },
+  drawerItems: {},
   menuItem: {
     flexDirection: 'row',
     alignItems: 'center',

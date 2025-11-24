@@ -1,9 +1,8 @@
-import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
-import LinearGradient from 'react-native-linear-gradient';
-import { useRoute, useNavigation } from '@react-navigation/native';
-import Icon from 'react-native-vector-icons/Ionicons';
-
+import React from "react";
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from "react-native";
+import LinearGradient from "react-native-linear-gradient";
+import { useRoute, useNavigation } from "@react-navigation/native";
+import Icon from "react-native-vector-icons/Ionicons";
 
 const LoanDetailsScreen = () => {
   const route = useRoute<any>();
@@ -13,117 +12,98 @@ const LoanDetailsScreen = () => {
   if (!loan) {
     return (
       <View style={styles.centered}>
-        <Text style={{ color: '#777', fontSize: 16 }}>No loan details available</Text>
+        <Text style={{ color: "#777", fontSize: 16 }}>No loan details available</Text>
       </View>
     );
   }
 
-  // --- Normalize inputs ---
-  const principal = Number(loan.amount_requested) || 0;
-  const months = Number(loan.repayment_term_months) || 1;
-
-  // --- Calculate loan data (20% monthly) ---
-  const monthlyRate = 0.20; // 20% per month
-  const interestAmount = principal * monthlyRate * months; // simple interest over months
-  const totalRepayable = principal + interestAmount;
-  const monthlyPayment = totalRepayable / months;
-
-  // Helper for formatting to exactly 2 decimal places
-  const formatCurrency = (amount: number) =>
-    amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  // helper formatting
+  const formatMoney = (v: number) =>
+    Number(v).toLocaleString(undefined, {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 40 }}>
-      {/* ===== HEADER ===== */}
-<LinearGradient colors={['#169AF9', '#37AAF2']} style={styles.header}>
-  <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButtonContainer}>
-    <Icon name="arrow-back" size={26} color="#fff" />
-  </TouchableOpacity>
-  <Text style={styles.headerTitle}>Loan Details</Text>
-</LinearGradient>
+      {/* HEADER */}
+      <LinearGradient colors={["#169AF9", "#37AAF2"]} style={styles.header}>
+        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
+          <Icon name="arrow-back" size={26} color="#fff" />
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>Loan Details</Text>
+      </LinearGradient>
 
-
-      {/* ===== LOAN INFO CARD ===== */}
+      {/* === LOAN SUMMARY === */}
       <View style={styles.card}>
         <Text style={styles.sectionTitle}>Loan Summary</Text>
 
-        <View style={styles.row}>
-          <Text style={styles.label}>Loan Amount:</Text>
-          <Text style={styles.value}>₱ {formatCurrency(principal)}</Text>
-        </View>
-
-        <View style={styles.row}>
-          <Text style={styles.label}>Interest Rate:</Text>
-          <Text style={styles.value}>20% (per month)</Text>
-        </View>
-
-        <View style={styles.row}>
-          <Text style={styles.label}>Interest Amount:</Text>
-          <Text style={styles.value}>₱ {formatCurrency(interestAmount)}</Text>
-        </View>
-
-        <View style={styles.row}>
-          <Text style={styles.label}>Repayment Term:</Text>
-          <Text style={styles.value}>{months} month{months > 1 ? 's' : ''}</Text>
-        </View>
-
-        <View style={styles.row}>
-          <Text style={styles.label}>Purpose:</Text>
-          <Text style={[styles.value, { flex: 1, textAlign: 'right' }]}>{loan.purpose}</Text>
-        </View>
-
-        <View style={styles.row}>
-          <Text style={styles.label}>Date Submitted:</Text>
-          <Text style={styles.value}>
-            {new Date(loan.created_at).toLocaleDateString()}
-          </Text>
-        </View>
-
-        <View style={styles.row}>
-          <Text style={styles.label}>Status:</Text>
-          <Text
-            style={[
-              styles.value,
-              {
-                color:
-                  loan.status === 'approved'
-                    ? '#00B050'
-                    : loan.status === 'pending'
-                    ? '#F39C12'
-                    : '#FF3B30',
-              },
-            ]}
-          >
-            {String(loan.status).toUpperCase()}
-          </Text>
-        </View>
+        <DetailRow label="Loan Amount:" value={`₱ ${formatMoney(loan.principal)}`} />
+        <DetailRow label="Interest Amount:" value={`₱ ${formatMoney(loan.interest)}`} />
+        <DetailRow
+          label="Total Payable:"
+          value={`₱ ${formatMoney(loan.total_payable)}`}
+          valueColor="#0077C8"
+        />
+        <DetailRow label="Purpose:" value={loan.purpose || "N/A"} />
+        <DetailRow
+          label="Date Submitted:"
+          value={new Date(loan.created_at).toLocaleDateString()}
+        />
+        <DetailRow
+          label="Date Approved:"
+          value={loan.disbursed_at ? new Date(loan.disbursed_at).toLocaleDateString() : "N/A"}
+        />
+        <DetailRow
+          label="Status:"
+          value={String(loan.status).toUpperCase()}
+          valueColor={
+            loan.status === "approved"
+              ? "#00B050"
+              : loan.status === "pending"
+              ? "#F39C12"
+              : "#FF3B30"
+          }
+        />
       </View>
 
-      {/* ===== PAYMENT BREAKDOWN ===== */}
+      {/* === REPAYMENT BREAKDOWN === */}
       <View style={styles.card}>
         <Text style={styles.sectionTitle}>Repayment Breakdown</Text>
 
-        <Text style={styles.paragraph}>
-          Interest is applied at 20% per month. The interest shown is calculated as:
-        </Text>
+        <DetailRow
+          label="Daily Payment:"
+          value={`₱ ${formatMoney(loan.daily_payment)}`}
+          valueColor="#0077C8"
+        />
+        <DetailRow label="Repayment Term:" value={`${loan.days} days`} />
+        <DetailRow label="Days Remaining:" value={loan.days_remaining} />
+        <DetailRow label="Days Completed:" value={loan.days - loan.days_remaining} />
 
-        <Text style={styles.paragraph}>
-          Interest = Principal × Monthly Rate × Number of Months
-        </Text>
+        <DetailRow
+          label="Total Paid:"
+          value={`₱ ${formatMoney(loan.total_repaid || 0)}`}
+        />
 
-        <View style={[styles.row, { marginTop: 10 }]}>
-          <Text style={styles.label}>Total Amount to Repay:</Text>
-          <Text style={[styles.value, { color: '#0077C8' }]}>
-            ₱ {formatCurrency(totalRepayable)}
-          </Text>
-        </View>
+        <DetailRow
+          label="Remaining Balance:"
+          value={`₱ ${formatMoney(loan.remaining_balance)}`}
+          valueColor="#0077C8"
+        />
 
-        <View style={[styles.row, { marginTop: 6 }]}>
-          <Text style={styles.label}>Monthly Payment:</Text>
-          <Text style={[styles.value, { color: '#0077C8' }]}>
-            ₱ {formatCurrency(monthlyPayment)}
-          </Text>
-        </View>
+        <DetailRow
+          label="Late Fees:"
+          value={`₱ ${formatMoney(loan.late_fees_total)}`}
+        />
+
+        <DetailRow
+          label="Next Due Date:"
+          value={
+            loan.latest_due_date
+              ? new Date(loan.latest_due_date).toLocaleDateString()
+              : "N/A"
+          }
+        />
       </View>
     </ScrollView>
   );
@@ -131,45 +111,56 @@ const LoanDetailsScreen = () => {
 
 export default LoanDetailsScreen;
 
-// === STYLES ===
+const DetailRow = ({
+  label,
+  value,
+  valueColor = "#000",
+}: {
+  label: string;
+  value: any;
+  valueColor?: string;
+}) => (
+  <View style={styles.row}>
+    <Text style={styles.label}>{label}</Text>
+    <Text style={[styles.value, { color: valueColor }]}>{value}</Text>
+  </View>
+);
+
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f7f9fc' },
-  centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  container: { flex: 1, backgroundColor: "#f7f9fc" },
+  centered: { flex: 1, justifyContent: "center", alignItems: "center" },
+
   header: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     paddingHorizontal: 15,
     paddingVertical: 20,
   },
-  backButton: { fontSize: 22, color: '#fff', marginRight: 10 },
-  headerTitle: { fontSize: 22, fontWeight: '700', color: '#fff', marginLeft: 10, },
+  backButton: { marginRight: 10 },
+  headerTitle: { fontSize: 22, fontWeight: "700", color: "#fff" },
+
   card: {
-    backgroundColor: '#fff',
+    backgroundColor: "#fff",
     borderRadius: 16,
     padding: 20,
     marginHorizontal: 20,
     marginTop: 15,
     elevation: 4,
     borderWidth: 2,
-    borderColor: '#169AF9',
+    borderColor: "#169AF9",
   },
   sectionTitle: {
     fontSize: 18,
-    fontWeight: '700',
-    color: '#000',
+    fontWeight: "700",
+    color: "#000",
     marginBottom: 10,
   },
+
   row: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+    flexDirection: "row",
+    justifyContent: "space-between",
     marginVertical: 5,
   },
-  label: { fontSize: 15, color: '#555' },
-  value: { fontSize: 15, fontWeight: '700', color: '#000' },
-  paragraph: {
-    fontSize: 14,
-    color: '#444',
-    lineHeight: 20,
-    marginTop: 5,
-  },
+  label: { fontSize: 15, color: "#555" },
+  value: { fontSize: 15, fontWeight: "700" },
 });
