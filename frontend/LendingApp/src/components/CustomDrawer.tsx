@@ -17,50 +17,59 @@ const API_BASE = 'http://192.168.1.222:5001/api';
 const CustomDrawer = (props: any) => {
   const [user, setUser] = useState<any>(null);
   const [hasActiveLoan, setHasActiveLoan] = useState<boolean>(false);
+  const [hasPendingLoan, setHasPendingLoan] = useState<boolean>(false);
   const [hasAnyLoan, setHasAnyLoan] = useState<boolean>(false);
 
-  useEffect(() => {
-    const fetchUserAndLoans = async () => {
-      try {
-        const token = await AsyncStorage.getItem('userToken');
-        if (!token) {
-          props.navigation.replace('Login');
-          return;
-        }
-
-        const headers = { Authorization: `Bearer ${token}` };
-
-        // Fetch user
-        const userRes = await axios.get(`${API_BASE}/auth/me`, { headers });
-        setUser(userRes.data);
-
-        // Fetch active loan
-        const activeLoanRes = await axios.get(`${API_BASE}/loans/my-active`, {
-          headers,
-        });
-
-        const activeLoan = activeLoanRes.data;
-
-        // Active loan condition (active/pending)
-        if (activeLoan && (activeLoan.status === 'active' || activeLoan.status === 'pending')) {
-          setHasActiveLoan(true);
-        } else {
-          setHasActiveLoan(false);
-        }
-
-        // Fetch ALL loans to determine if My Loan should be visible
-        const allLoansRes = await axios.get(`${API_BASE}/loans/my-loans`, {
-          headers,
-        });
-
-        setHasAnyLoan(allLoansRes.data.length > 0);
-
-      } catch (error) {
-        console.error('❌ Failed to load user/loan info:', error);
+  const loadDrawerData = async () => {
+    try {
+      const token = await AsyncStorage.getItem('userToken');
+      if (!token) {
+        props.navigation.replace('Login');
+        return;
       }
-    };
 
-    fetchUserAndLoans();
+      const headers = { Authorization: `Bearer ${token}` };
+
+      // Fetch user
+      const userRes = await axios.get(`${API_BASE}/auth/me`, { headers });
+      setUser(userRes.data);
+
+      // Fetch active loan
+      const activeRes = await axios.get(`${API_BASE}/loans/my-active`, {
+        headers,
+      });
+      const activeLoan = activeRes.data;
+
+      setHasActiveLoan(!!activeLoan?.id && activeLoan.status === 'active');
+
+      // Fetch latest loan (to detect pending)
+      const latestRes = await axios.get(`${API_BASE}/loans/my-latest`, {
+        headers,
+      });
+      const latestLoan = latestRes.data?.latestLoan;
+
+      setHasPendingLoan(latestLoan?.status === 'pending');
+
+      // Fetch all loans (to show My Loan button)
+      const allRes = await axios.get(`${API_BASE}/loans/my-loans`, {
+        headers,
+      });
+      setHasAnyLoan(allRes.data.length > 0);
+
+    } catch (error) {
+      console.error('❌ Failed to load drawer data:', error);
+    }
+  };
+
+  useEffect(() => {
+    loadDrawerData();
+
+    // Refresh drawer whenever it is opened
+    const unsubscribe = props.navigation.addListener('focus', () => {
+      loadDrawerData();
+    });
+
+    return unsubscribe;
   }, []);
 
   // Logout
@@ -128,8 +137,8 @@ const CustomDrawer = (props: any) => {
             <Text style={styles.menuText}>Dashboard</Text>
           </TouchableOpacity>
 
-          {/* Loan Application — HIDDEN if active/pending loan */}
-          {!hasActiveLoan && (
+          {/* Loan Application — HIDE if pending OR active */}
+          {!hasActiveLoan && !hasPendingLoan && (
             <TouchableOpacity
               style={styles.menuItem}
               onPress={() => {
@@ -142,7 +151,7 @@ const CustomDrawer = (props: any) => {
             </TouchableOpacity>
           )}
 
-          {/* My Loan — SHOW only if user has ANY loans */}
+          {/* My Loan — show if ANY loan exists */}
           {hasAnyLoan && (
             <TouchableOpacity
               style={styles.menuItem}

@@ -17,12 +17,69 @@ const LoanDetailsScreen = () => {
     );
   }
 
-  // helper formatting
+  /** ================================
+   *  NORMALIZATION — supports ALL formats
+   * ================================ */
+
+  const principal =
+    Number(loan.principal) ||
+    Number(loan.amount_requested) ||
+    Number(loan.disbursed_amount) ||
+    0;
+
+  const interest =
+    Number(loan.interest) ||
+    Number(principal * 0.2) ||
+    0;
+
+  const total_payable =
+    Number(loan.total_payable) ||
+    Number(principal + interest) ||
+    0;
+
+  const days =
+    Number(loan.days) ||
+    Number(loan.repayment_days) ||
+    30;
+
+  const daily_payment =
+    Number(loan.daily_payment) ||
+    Number(total_payable / days) ||
+    0;
+
+  const total_repaid =
+    Number(loan.total_repaid) ||
+    0;
+
+  const remaining_balance =
+    Number(loan.remaining_balance) ||
+    Number(total_payable - total_repaid);
+
+  const late_fees_total =
+    Number(loan.late_fees_total) || 0;
+
+  const days_remaining =
+    Number(loan.days_remaining) ||
+    Math.max(0, days - Math.floor(total_repaid / daily_payment));
+
+  const submittedDate =
+    loan.created_at ? new Date(loan.created_at) : null;
+
+  const approvedDate =
+    loan.disbursed_at ? new Date(loan.disbursed_at) : null;
+
+  const nextDue =
+    loan.latest_due_date ? new Date(loan.latest_due_date) : null;
+
+  const purpose = loan.purpose || "N/A";
+
   const formatMoney = (v: number) =>
     Number(v).toLocaleString(undefined, {
       minimumFractionDigits: 2,
       maximumFractionDigits: 2,
     });
+
+  /** ================================ */
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 40 }}>
@@ -38,22 +95,26 @@ const LoanDetailsScreen = () => {
       <View style={styles.card}>
         <Text style={styles.sectionTitle}>Loan Summary</Text>
 
-        <DetailRow label="Loan Amount:" value={`₱ ${formatMoney(loan.principal)}`} />
-        <DetailRow label="Interest Amount:" value={`₱ ${formatMoney(loan.interest)}`} />
+        <DetailRow label="Loan Amount:" value={`₱ ${formatMoney(principal)}`} />
+        <DetailRow label="Interest Amount:" value={`₱ ${formatMoney(interest)}`} />
         <DetailRow
           label="Total Payable:"
-          value={`₱ ${formatMoney(loan.total_payable)}`}
+          value={`₱ ${formatMoney(total_payable)}`}
           valueColor="#0077C8"
         />
-        <DetailRow label="Purpose:" value={loan.purpose || "N/A"} />
+
+        <DetailRow label="Purpose:" value={purpose} />
+
         <DetailRow
           label="Date Submitted:"
-          value={new Date(loan.created_at).toLocaleDateString()}
+          value={submittedDate ? submittedDate.toLocaleDateString() : "N/A"}
         />
+
         <DetailRow
           label="Date Approved:"
-          value={loan.disbursed_at ? new Date(loan.disbursed_at).toLocaleDateString() : "N/A"}
+          value={approvedDate ? approvedDate.toLocaleDateString() : "N/A"}
         />
+
         <DetailRow
           label="Status:"
           value={String(loan.status).toUpperCase()}
@@ -62,6 +123,8 @@ const LoanDetailsScreen = () => {
               ? "#00B050"
               : loan.status === "pending"
               ? "#F39C12"
+              : loan.status === "active"
+              ? "#169AF9"
               : "#FF3B30"
           }
         />
@@ -73,36 +136,30 @@ const LoanDetailsScreen = () => {
 
         <DetailRow
           label="Daily Payment:"
-          value={`₱ ${formatMoney(loan.daily_payment)}`}
+          value={`₱ ${formatMoney(daily_payment)}`}
           valueColor="#0077C8"
         />
-        <DetailRow label="Repayment Term:" value={`${loan.days} days`} />
-        <DetailRow label="Days Remaining:" value={loan.days_remaining} />
-        <DetailRow label="Days Completed:" value={loan.days - loan.days_remaining} />
+
+        <DetailRow label="Repayment Term:" value={`${days} days`} />
+        <DetailRow label="Days Remaining:" value={days_remaining} />
+        <DetailRow label="Days Completed:" value={days - days_remaining} />
 
         <DetailRow
           label="Total Paid:"
-          value={`₱ ${formatMoney(loan.total_repaid || 0)}`}
+          value={`₱ ${formatMoney(total_repaid)}`}
         />
 
         <DetailRow
           label="Remaining Balance:"
-          value={`₱ ${formatMoney(loan.remaining_balance)}`}
+          value={`₱ ${formatMoney(remaining_balance)}`}
           valueColor="#0077C8"
         />
 
-        <DetailRow
-          label="Late Fees:"
-          value={`₱ ${formatMoney(loan.late_fees_total)}`}
-        />
+        <DetailRow label="Late Fees:" value={`₱ ${formatMoney(late_fees_total)}`} />
 
         <DetailRow
           label="Next Due Date:"
-          value={
-            loan.latest_due_date
-              ? new Date(loan.latest_due_date).toLocaleDateString()
-              : "N/A"
-          }
+          value={nextDue ? nextDue.toLocaleDateString() : "N/A"}
         />
       </View>
     </ScrollView>
@@ -149,10 +206,10 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: "#169AF9",
   },
+
   sectionTitle: {
     fontSize: 18,
     fontWeight: "700",
-    color: "#000",
     marginBottom: 10,
   },
 
