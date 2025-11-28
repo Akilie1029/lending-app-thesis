@@ -1,106 +1,65 @@
 // src/services/adminDashboardService.ts
 import axios from "axios";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { mapDashboard } from "../mappers/adminDashboardMapper";
+import { API_BASE } from "../config";
 
-/* ------------------------------
- * Types
- * ------------------------------ */
+async function getAuthHeaders() {
+  const token = await AsyncStorage.getItem("userToken");
+  return token
+    ? { Authorization: `Bearer ${token}` }
+    : {};
+}
 
-export type DashboardResponse = {
-  borrowerCount: number;
-  activeLoanCount: number;
-  rejectedCount: number;
-  pendingLoanApproval: number;
-  pendingDisbursement: number;
-  totalDisbursedLoan: number;
+async function load() {
+  const headers = await getAuthHeaders();
 
-  loanStatusDistribution: {
-    unpaidAmount: number;
-    paidAmount: number;
-    overdueAmount: number;
-  };
+  try {
+    const res = await axios.get(`${API_BASE}/admin/dashboard`, { headers });
 
-  paymentOverview: {
-    collectiblesToday: number;
-    actualPayments: number;
-  };
+    const data = res.data || {};
 
-  weeklyCollections: number[];
+    // Normalize each section (fallbacks prevent crashes)
+    return {
+      borrowerCount: data.borrowerCount ?? 0,
+      activeLoanCount: data.activeLoanCount ?? 0,
+      rejectedCount: data.rejectedCount ?? 0,
+      pendingLoanApproval: data.pendingLoanApproval ?? 0,
+      pendingDisbursement: data.pendingDisbursement ?? 0,
 
-  weeklyPayments4: number[];
-  weeklyCollectibles4: number[];
+      loanStatusDistribution: {
+        paidAmount: data.loanStatusDistribution?.paidAmount ?? 0,
+        unpaidAmount: data.loanStatusDistribution?.unpaidAmount ?? 0,
+        overdueAmount: data.loanStatusDistribution?.overdueAmount ?? 0,
+      },
 
-  onTimeCounts4: number[];
-  lateCounts4: number[];
+      // 4-week overview
+      paymentOverview4: {
+        labels: data.paymentOverview4?.labels ?? ["W1", "W2", "W3", "W4"],
+        expected: data.paymentOverview4?.expected ?? [0, 0, 0, 0],
+        actual: data.paymentOverview4?.actual ?? [0, 0, 0, 0],
+      },
 
-  weeklyRepayments12: number[];
-  weeklyDisbursements12: number[];
-  weeklyNet12: number[];
-};
+      weeklyCollections: {
+        labels: data.weeklyCollections?.labels ?? [],
+        values: data.weeklyCollections?.values ?? [],
+      },
 
-export type DashboardUI = {
-  borrowerCount: number;
-  activeLoanCount: number;
-  rejectedCount: number;
-  pendingLoanApproval: number;
-  pendingDisbursement: number;
-  totalDisbursedLoan: number;
+      paymentBehavior: {
+        labels: data.paymentBehavior?.labels ?? ["On Time", "Late"],
+        onTime: data.paymentBehavior?.onTime ?? [0],
+        late: data.paymentBehavior?.late ?? [0],
+      },
 
-  loanStatusDistribution: {
-    unpaidAmount: number;
-    paidAmount: number;
-    overdueAmount: number;
-  };
+      cashflow: {
+        labels: data.cashflow?.labels ?? [],
+        repaid: data.cashflow?.repaid ?? [],
+        disbursed: data.cashflow?.disbursed ?? [],
+      },
+    };
+  } catch (err) {
+    console.error("Dashboard load error:", err?.response?.data || err.message);
+    throw err;
+  }
+}
 
-  paymentOverview: {
-    collectiblesToday: number;
-    actualPayments: number;
-  };
-
-  weeklyCollections: {
-    labels: string[];
-    values: number[];
-  };
-
-  paymentOverview4: {
-    labels: string[];
-    expected: number[];
-    actual: number[];
-  };
-
-  paymentBehavior: {
-    labels: string[];
-    onTime: number[];
-    late: number[];
-  };
-
-  cashflow: {
-    labels: string[];
-    disbursed: number[];
-    repaid: number[];
-    net: number[];
-  };
-};
-
-/* ------------------------------
- * Service
- * ------------------------------ */
-const adminDashboardService = {
-  async load(): Promise<DashboardUI> {
-    const token = await AsyncStorage.getItem("userToken");
-    if (!token) throw new Error("No auth token found.");
-
-    const res = await axios.get<DashboardResponse>(
-      "http://192.168.1.222:5001/api/admin/dashboard-stats",
-      { headers: { Authorization: `Bearer ${token}` } }
-    );
-
-    const raw = res.data;
-
-    // map & normalize for UI safety
-    return mapDashboard(raw);
-  },
-};
-
-export default adminDashboardService;
+export default { load };

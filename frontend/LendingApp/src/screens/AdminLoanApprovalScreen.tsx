@@ -1,5 +1,4 @@
 // src/screens/AdminLoanApprovalScreen.tsx
-
 import React, { useEffect, useState } from "react";
 import {
   View,
@@ -13,22 +12,23 @@ import {
 import axios from "axios";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { format } from "date-fns";
-
-// ✅ ADDED — new header component (back arrow + blue bar)
 import SmallHeader from "../components/SmallHeader";
+import { normalizeLoan } from "../utils/normalizeLoan";
+import { BASE_URL } from "../config";
 
 type LoanRow = {
   id: string;
   user_id: string;
   full_name?: string;
-  amount_requested: number;
+  amount_requested?: number | string;
+  amount?: number | string;
   purpose: string;
-  repayment_term_months: number;
+  days?: number | null;
   status: string;
   created_at: string;
 };
 
-export default function AdminLoanApprovalScreen({ navigation }) {
+export default function AdminLoanApprovalScreen({ navigation }: any) {
   const [loading, setLoading] = useState(true);
   const [loans, setLoans] = useState<LoanRow[]>([]);
   const [processing, setProcessing] = useState<{ [key: string]: boolean }>({});
@@ -37,9 +37,9 @@ export default function AdminLoanApprovalScreen({ navigation }) {
     loadLoans();
   }, []);
 
-  // ============================================================
-  // 📌 LOAD PENDING LOANS
-  // ============================================================
+  // ------------------------------
+  // Load all pending loans
+  // ------------------------------
   const loadLoans = async () => {
     setLoading(true);
 
@@ -47,13 +47,12 @@ export default function AdminLoanApprovalScreen({ navigation }) {
       const token = await AsyncStorage.getItem("userToken");
 
       const res = await axios.get(
-        "http://192.168.1.222:5001/api/admin/loan-approvals",
-        {
-          headers: { Authorization: `Bearer ${token}` },
-        }
+        `${BASE_URL}/api/admin/loan-approvals`,
+        { headers: { Authorization: `Bearer ${token}` } }
       );
 
-      setLoans(res.data || []);
+      const normalized = (res.data || []).map((r: any) => normalizeLoan(r));
+      setLoans(normalized || []);
     } catch (err) {
       console.error("Load pending loans error:", err);
       Alert.alert("Error", "Failed to load pending loans.");
@@ -62,9 +61,9 @@ export default function AdminLoanApprovalScreen({ navigation }) {
     }
   };
 
-  // ============================================================
-  // 📌 APPROVE LOAN
-  // ============================================================
+  // ------------------------------
+  // APPROVE
+  // ------------------------------
   const approveLoan = async (loanId: string) => {
     Alert.alert("Confirm", "Approve this loan?", [
       { text: "Cancel", style: "cancel" },
@@ -77,7 +76,7 @@ export default function AdminLoanApprovalScreen({ navigation }) {
             const token = await AsyncStorage.getItem("userToken");
 
             await axios.post(
-              `http://192.168.1.222:5001/api/admin/loan-approvals/${loanId}/approve`,
+              `${BASE_URL}/api/admin/loan-approvals/${loanId}/approve`,
               {},
               { headers: { Authorization: `Bearer ${token}` } }
             );
@@ -86,7 +85,7 @@ export default function AdminLoanApprovalScreen({ navigation }) {
             loadLoans();
           } catch (err) {
             console.error("Approve error:", err);
-            Alert.alert("Error", "Failed to approve loan");
+            Alert.alert("Error", "Failed to approve loan.");
           } finally {
             setProcessing((p) => ({ ...p, [loanId]: false }));
           }
@@ -95,9 +94,9 @@ export default function AdminLoanApprovalScreen({ navigation }) {
     ]);
   };
 
-  // ============================================================
-  // 📌 REJECT LOAN
-  // ============================================================
+  // ------------------------------
+  // REJECT
+  // ------------------------------
   const rejectLoan = async (loanId: string) => {
     Alert.alert("Reject Loan", "Are you sure you want to reject this loan?", [
       { text: "Cancel", style: "cancel" },
@@ -111,13 +110,12 @@ export default function AdminLoanApprovalScreen({ navigation }) {
             const token = await AsyncStorage.getItem("userToken");
 
             await axios.post(
-              `http://192.168.1.222:5001/api/admin/loan-approvals/${loanId}/reject`,
+              `${BASE_URL}/api/admin/loan-approvals/${loanId}/reject`,
               { note: "" },
               { headers: { Authorization: `Bearer ${token}` } }
             );
 
             Alert.alert("Rejected", "Loan has been rejected.");
-
             setLoans((cur) => cur.filter((l) => l.id !== loanId));
           } catch (err) {
             console.error("Reject error:", err);
@@ -130,31 +128,25 @@ export default function AdminLoanApprovalScreen({ navigation }) {
     ]);
   };
 
-  // ============================================================
-  // 📌 Render Loan Card
-  // ============================================================
   const renderLoan = ({ item }: { item: LoanRow }) => (
     <View style={styles.card}>
       <View style={styles.row}>
         <Text style={styles.name}>{item.full_name || "Unknown borrower"}</Text>
         <Text style={styles.amount}>
-          ₱ {Number(item.amount_requested).toLocaleString()}
+          ₱ {Number(item.amount ?? item.amount_requested ?? 0).toLocaleString()}
         </Text>
       </View>
 
       <Text style={styles.purpose}>{item.purpose}</Text>
 
       <View style={styles.metaRow}>
-        <Text style={styles.meta}>
-          Term: {item.repayment_term_months} months
-        </Text>
+        <Text style={styles.meta}>Term: {item.days ?? 0} days</Text>
         <Text style={styles.meta}>
           Applied: {format(new Date(item.created_at), "MMM d, yyyy")}
         </Text>
       </View>
 
       <View style={styles.actions}>
-        {/* APPROVE */}
         <TouchableOpacity
           style={[styles.button, { backgroundColor: "#00C853" }]}
           onPress={() => approveLoan(item.id)}
@@ -167,7 +159,6 @@ export default function AdminLoanApprovalScreen({ navigation }) {
           )}
         </TouchableOpacity>
 
-        {/* REJECT */}
         <TouchableOpacity
           style={[styles.button, { backgroundColor: "#ff3b30" }]}
           onPress={() => rejectLoan(item.id)}
@@ -183,43 +174,33 @@ export default function AdminLoanApprovalScreen({ navigation }) {
     </View>
   );
 
-  // ============================================================
-  // 📌 Loading UI
-  // ============================================================
+  // ------------------------------
+  // RENDER
+  // ------------------------------
   if (loading) {
     return (
       <View style={styles.center}>
+        <SmallHeader title="Loan Approval" />
         <ActivityIndicator size="large" />
       </View>
     );
   }
 
-  // ============================================================
-  // 📌 Empty State
-  // ============================================================
   if (!loans.length) {
     return (
       <View style={styles.center}>
-        {/* ✅ ADDED — header even on empty state */}
         <SmallHeader title="Loan Approval" />
-
-        <Text style={{ color: "#666", marginTop: 20 }}>
-          No pending loans.
-        </Text>
+        <Text style={{ color: "#666", marginTop: 20 }}>No pending loans.</Text>
       </View>
     );
   }
 
-  // ============================================================
-  // 📌 Main UI with Header (NEW)
-  // ============================================================
   return (
     <View style={{ flex: 1 }}>
-      {/* ✅ ADDED — new blue header with back arrow */}
       <SmallHeader title="Loan Approval" />
 
       <FlatList
-        contentContainerStyle={{ padding: 12, paddingBottom: 48 }}
+        contentContainerStyle={{ padding: 12 }}
         data={loans}
         keyExtractor={(i) => i.id}
         renderItem={renderLoan}
@@ -234,20 +215,16 @@ const styles = StyleSheet.create({
     backgroundColor: "#fff",
     padding: 12,
     borderRadius: 12,
-    marginVertical: 8,
     elevation: 3,
+    marginVertical: 8,
   },
   row: { flexDirection: "row", justifyContent: "space-between" },
-  name: { fontWeight: "700", fontSize: 16 },
-  amount: { fontWeight: "800", fontSize: 16, color: "#0071b2" },
-  purpose: { color: "#444", marginTop: 8, marginBottom: 6 },
+  name: { fontSize: 16, fontWeight: "700" },
+  amount: { fontSize: 16, fontWeight: "800", color: "#0071b2" },
+  purpose: { color: "#444", marginTop: 8 },
   metaRow: { flexDirection: "row", justifyContent: "space-between" },
-  meta: { color: "#666", fontSize: 12 },
-  actions: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    marginTop: 12,
-  },
+  meta: { fontSize: 12, color: "#666" },
+  actions: { flexDirection: "row", marginTop: 12 },
   button: {
     flex: 1,
     paddingVertical: 10,

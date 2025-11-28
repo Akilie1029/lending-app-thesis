@@ -17,8 +17,7 @@ import Icon from "react-native-vector-icons/Ionicons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import axios from "axios";
 import { useRoute, useNavigation } from "@react-navigation/native";
-
-const API_BASE = "http://192.168.1.222:5001/api";
+import { API_BASE } from "../config";
 
 export default function RepayLoanScreen() {
   const route = useRoute<any>();
@@ -44,7 +43,6 @@ export default function RepayLoanScreen() {
   const remaining = Number(loan.remaining_balance ?? loan.total_payable ?? 0);
 
   const amountToPay = () => {
-    // prefer custom amount if valid positive number, else daily
     const parsed = Number(customAmount);
     if (!isNaN(parsed) && parsed > 0) return parsed;
     return daily;
@@ -54,6 +52,8 @@ export default function RepayLoanScreen() {
     try {
       setLoading(true);
       const token = await AsyncStorage.getItem("userToken");
+      if (!token) throw new Error("User not authenticated");
+
       const res = await axios.post(
         `${API_BASE}/loans/${loan.id}/pay`,
         {
@@ -64,7 +64,6 @@ export default function RepayLoanScreen() {
         { headers: { Authorization: `Bearer ${token}` } }
       );
 
-      // backend should return updated loan or success
       const updatedLoan = res.data?.loan ?? res.data;
       setLoading(false);
 
@@ -72,11 +71,10 @@ export default function RepayLoanScreen() {
         {
           text: "OK",
           onPress: () => {
-            // navigate home or to loan details
             navigation.reset({
               index: 0,
-              routes: [{ name: "Home" }],
-            } as any);
+              routes: [{ name: "Home" as any }],
+            });
           },
         },
       ]);
@@ -85,7 +83,7 @@ export default function RepayLoanScreen() {
       setLoading(false);
       Alert.alert(
         "Payment failed",
-        err?.response?.data?.message || "Unable to complete payment."
+        err?.response?.data?.message || err?.response?.data?.error || "Unable to complete payment."
       );
     }
   };
@@ -116,20 +114,17 @@ export default function RepayLoanScreen() {
           <View style={{ marginTop: 10 }}>
             <Text style={styles.small}>Next Due</Text>
             <Text style={styles.small}>
-              {loan.latest_due_date
-                ? new Date(loan.latest_due_date).toLocaleDateString()
-                : "N/A"}
+              {loan.latest_due_date ? new Date(loan.latest_due_date).toLocaleDateString() : "N/A"}
             </Text>
           </View>
         </View>
 
         <Text style={styles.sectionTitle}>Choose Payment Method</Text>
 
-        {/* Methods - two per row */}
         <View style={styles.methodRow}>
           <TouchableOpacity
             style={styles.methodCard}
-            onPress={() => navigation.navigate("GCashPay", { loan, amount: amountToPay() })}
+            onPress={() => navigation.navigate("GCashPay" as any, { loan, amount: amountToPay() })}
           >
             <Icon name="phone-portrait" size={28} color="#0077C8" />
             <Text style={styles.methodTitle}>GCash</Text>
@@ -138,7 +133,7 @@ export default function RepayLoanScreen() {
 
           <TouchableOpacity
             style={styles.methodCard}
-            onPress={() => navigation.navigate("MayaPay", { loan, amount: amountToPay() })}
+            onPress={() => navigation.navigate("MayaPay" as any, { loan, amount: amountToPay() })}
           >
             <Icon name="wallet" size={28} color="#8A2BE2" />
             <Text style={styles.methodTitle}>Maya</Text>
@@ -147,10 +142,7 @@ export default function RepayLoanScreen() {
         </View>
 
         <View style={styles.methodRow}>
-          <TouchableOpacity
-            style={styles.methodCard}
-            onPress={() => setShowBankForm(true)}
-          >
+          <TouchableOpacity style={styles.methodCard} onPress={() => setShowBankForm(true)}>
             <Icon name="md-bank" size={28} color="#0077C8" />
             <Text style={styles.methodTitle}>Bank Transfer</Text>
             <Text style={styles.methodSub}>Select bank & submit</Text>
@@ -158,7 +150,7 @@ export default function RepayLoanScreen() {
 
           <TouchableOpacity
             style={styles.methodCard}
-            onPress={() => navigation.navigate("CardPay", { loan, amount: amountToPay() })}
+            onPress={() => navigation.navigate("CardPay" as any, { loan, amount: amountToPay() })}
           >
             <Icon name="card" size={28} color="#0077C8" />
             <Text style={styles.methodTitle}>Debit / Credit</Text>
@@ -166,7 +158,6 @@ export default function RepayLoanScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* custom amount input */}
         <View style={{ marginTop: 16 }}>
           <Text style={{ color: "#666", marginBottom: 6 }}>Pay a different amount</Text>
           <TextInput
@@ -178,12 +169,10 @@ export default function RepayLoanScreen() {
           />
         </View>
 
-        {/* Bank inline form modal */}
         <Modal visible={showBankForm} animationType="slide">
           <View style={styles.modalWrap}>
             <Text style={styles.modalTitle}>Bank Transfer</Text>
 
-            {/* simple static bank list */}
             {["BDO", "BPI", "Landbank", "Metrobank", "PNB"].map((b) => (
               <TouchableOpacity
                 key={b}
@@ -217,24 +206,19 @@ export default function RepayLoanScreen() {
                   return;
                 }
                 setShowProcessing(true);
-                // simulate flow then call backend
                 setTimeout(async () => {
                   setShowProcessing(false);
-                  // call backend add payment
                   await payViaApi("bank", {
                     amount: amountToPay(),
                     metadata: { bank: selectedBank, account: bankAccount },
                   });
-                }, 1000);
+                }, 800);
               }}
             >
               <Text style={styles.primaryButtonText}>Submit Bank Payment</Text>
             </TouchableOpacity>
 
-            <TouchableOpacity
-              style={[styles.secondaryButton, { marginTop: 10 }]}
-              onPress={() => setShowBankForm(false)}
-            >
+            <TouchableOpacity style={[styles.secondaryButton, { marginTop: 10 }]} onPress={() => setShowBankForm(false)}>
               <Text style={styles.secondaryButtonText}>Cancel</Text>
             </TouchableOpacity>
           </View>
@@ -247,15 +231,11 @@ export default function RepayLoanScreen() {
           </Modal>
         </Modal>
 
-        {/* Pay now quick action - fallback */}
         <View style={{ marginTop: 20 }}>
           <TouchableOpacity
             style={[styles.primaryButton, { alignSelf: "stretch" }]}
             onPress={() =>
-              Alert.alert(
-                "Choose method",
-                "Please choose GCash / Maya / Bank or Card to proceed."
-              )
+              Alert.alert("Choose method", "Please choose GCash / Maya / Bank or Card to proceed.")
             }
           >
             <Text style={styles.primaryButtonText}>Pay Now</Text>
@@ -299,4 +279,3 @@ const styles = StyleSheet.create({
   fullscreenLoader: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, justifyContent: "center", alignItems: "center", backgroundColor: "rgba(255,255,255,0.5)" },
   customInput: { backgroundColor: "#fff", borderRadius: 8, padding: 12, borderWidth: 1, borderColor: "#eee" },
 });
- 

@@ -1,129 +1,130 @@
+// src/screens/GCashSimScreen.tsx
 import React, { useState } from "react";
-import { View, Text, TextInput, StyleSheet, TouchableOpacity, Alert, ActivityIndicator } from "react-native";
-import LinearGradient from "react-native-linear-gradient";
+import {
+  View,
+  Text,
+  StyleSheet,
+  ActivityIndicator,
+  TouchableOpacity,
+  Alert,
+} from "react-native";
 import Icon from "react-native-vector-icons/Ionicons";
+import LinearGradient from "react-native-linear-gradient";
+import { useRoute, useNavigation } from "@react-navigation/native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import axios from "axios";
+import { API_BASE } from "../config";
 
-const API_BASE = "http://192.168.1.222:5001/api";
+export default function GCashSimScreen() {
+  const route = useRoute<any>();
+  const navigation = useNavigation<any>();
 
-export default function GCashPayScreen({ route, navigation }: any) {
-  const { loan, amount } = route.params;
-  const [pin, setPin] = useState("");
+  const loan = route.params?.loan;
+  const amount = Number(route.params?.amount ?? loan?.daily_payment ?? 0);
   const [loading, setLoading] = useState(false);
 
-  const handlePay = async () => {
-    if (pin.length !== 6) {
-      Alert.alert("GCash PIN Required", "Enter your 6-digit MPIN.");
-      return;
-    }
+  if (!loan) {
+    return (
+      <View style={styles.center}>
+        <Text>No loan selected.</Text>
+      </View>
+    );
+  }
 
+  const handlePay = async () => {
     try {
       setLoading(true);
       const token = await AsyncStorage.getItem("userToken");
 
-      await axios.post(
+      if (!token) {
+        Alert.alert("Login required", "Please login to continue.");
+        setLoading(false);
+        return;
+      }
+
+      const res = await axios.post(
         `${API_BASE}/loans/${loan.id}/pay`,
         {
           amount,
           method: "gcash",
-          metadata: { mpin: pin },
+          metadata: { simulated: true },
         },
-        { headers: { Authorization: `Bearer ${token}` } }
+        {
+          headers: { Authorization: `Bearer ${token}` },
+        }
       );
 
       setLoading(false);
 
-      Alert.alert("Payment Success", "GCash payment recorded.", [
+      Alert.alert("Payment Successful", "GCash payment recorded.", [
         {
           text: "OK",
-          onPress: () =>
+          onPress: () => {
             navigation.reset({
               index: 0,
               routes: [{ name: "Home" }],
-            }),
+            });
+          },
         },
       ]);
     } catch (err: any) {
+      console.error("GCash error", err?.response?.data || err);
       setLoading(false);
+
       Alert.alert(
-        "Payment Failed",
-        err?.response?.data?.message || "Unable to complete GCash payment."
+        "Failed",
+        err?.response?.data?.message || "Unable to complete payment."
       );
     }
   };
 
   return (
-    <View style={styles.container}>
-      <LinearGradient colors={["#0274E8", "#169AF9"]} style={styles.header}>
+    <View style={{ flex: 1, backgroundColor: "#f6f7fb" }}>
+      <LinearGradient colors={["#169AF9", "#37AAF2"]} style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()}>
           <Icon name="arrow-back" size={26} color="#fff" />
         </TouchableOpacity>
+
         <Text style={styles.headerTitle}>GCash Payment</Text>
-        <View style={{ width: 26 }} />
+        <View style={{ width: 44 }} />
       </LinearGradient>
 
-      <View style={styles.card}>
+      <View style={styles.container}>
         <Text style={styles.label}>Amount to Pay</Text>
-        <Text style={styles.amount}>₱ {amount.toLocaleString()}</Text>
+        <Text style={styles.value}>₱ {amount.toLocaleString()}</Text>
 
-        <Text style={[styles.label, { marginTop: 15 }]}>Enter MPIN</Text>
-        <TextInput
-          secureTextEntry
-          keyboardType="numeric"
-          maxLength={6}
-          value={pin}
-          onChangeText={setPin}
-          style={styles.input}
-        />
-
-        <TouchableOpacity style={styles.button} onPress={handlePay}>
-          <Text style={styles.buttonText}>Pay Now</Text>
+        <TouchableOpacity
+          style={styles.payBtn}
+          onPress={handlePay}
+          disabled={loading}
+        >
+          {loading ? (
+            <ActivityIndicator color="#fff" />
+          ) : (
+            <Text style={styles.payText}>Confirm GCash Payment</Text>
+          )}
         </TouchableOpacity>
-
-        {loading && <ActivityIndicator size="large" style={{ marginTop: 20 }} />}
       </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#f6f7fb" },
-  header: {
-    paddingTop: 50,
-    paddingBottom: 18,
-    paddingHorizontal: 16,
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-  },
-  headerTitle: { fontSize: 20, fontWeight: "700", color: "#fff" },
-  card: {
-    backgroundColor: "#fff",
-    margin: 20,
-    padding: 20,
-    borderRadius: 16,
-    borderWidth: 2,
-    borderColor: "#169AF9",
-  },
-  label: { fontSize: 14, fontWeight: "500", color: "#666" },
-  amount: { fontSize: 32, fontWeight: "800", marginTop: 4 },
-  input: {
-    borderWidth: 1.5,
-    borderColor: "#ccc",
-    padding: 12,
-    marginTop: 10,
-    borderRadius: 10,
-    fontSize: 20,
-    letterSpacing: 6,
-    textAlign: "center",
-  },
-  button: {
-    backgroundColor: "#0274E8",
-    paddingVertical: 12,
+  header: { paddingTop: 50, paddingBottom: 20, paddingHorizontal: 16, flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  headerTitle: { color: "#fff", fontWeight: "700", fontSize: 20 },
+
+  container: { padding: 20, marginTop: 20 },
+  label: { color: "#666", fontSize: 14 },
+  value: { fontSize: 28, fontWeight: "900", marginVertical: 10 },
+
+  payBtn: {
+    backgroundColor: "#169AF9",
+    paddingVertical: 14,
     borderRadius: 12,
-    marginTop: 20,
     alignItems: "center",
+    marginTop: 20,
   },
-  buttonText: { color: "#fff", fontSize: 16, fontWeight: "700" },
+  payText: { color: "#fff", fontWeight: "800" },
+
+  center: { flex: 1, justifyContent: "center", alignItems: "center" },
 });

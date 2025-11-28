@@ -51,23 +51,19 @@ export default function AdminDashboardScreen() {
     );
   }
 
-  /* -------------------------------------------------------------
-   * Derived data
-   * ------------------------------------------------------------- */
+  const paid = stats.loanStatusDistribution.paidAmount ?? 0;
+  const unpaid = stats.loanStatusDistribution.unpaidAmount ?? 0;
+  const overdue = stats.loanStatusDistribution.overdueAmount ?? 0;
 
-  const ringTotal =
-    stats.loanStatusDistribution.paidAmount +
-    stats.loanStatusDistribution.unpaidAmount +
-    stats.loanStatusDistribution.overdueAmount;
-
-  const pct = (v: number) =>
-    ringTotal === 0 ? 0 : Math.round((v / ringTotal) * 100);
+  const total = paid + unpaid + overdue;
+  const pct = (value: number) =>
+    total === 0 ? 0 : Math.round((value / total) * 100);
 
   return (
     <ScrollView style={styles.container}>
       <AdminHeader title="Admin Dashboard" />
 
-      {/* ====================== TOP STATS ====================== */}
+      {/* TOP STATS */}
       <View style={styles.statsRow}>
         <View style={styles.statCard}>
           <Text style={styles.statLabel}>Borrowers</Text>
@@ -86,17 +82,15 @@ export default function AdminDashboardScreen() {
           <Text style={[styles.statValue, { color: "#fff" }]}>
             {stats.rejectedCount}
           </Text>
-          <Text style={[styles.statFoot, { color: "#ffe" }]}>
-            Declined apps
-          </Text>
+          <Text style={[styles.statFoot, { color: "#ffe" }]}>Declined</Text>
         </View>
       </View>
 
-      {/* ====================== PENDING ACTIONS (Option C) ====================== */}
+      {/* PENDING ACTIONS */}
       <View style={styles.pendingContainer}>
         <TouchableOpacity
           style={styles.pendingYellow}
-          onPress={() => navigation.navigate("AdminLoanApprovalScreen")}
+          onPress={() => navigation.navigate("AdminLoanApprovalScreen" as never)}
         >
           <Text style={styles.pendingTextDark}>Pending Loan Approval</Text>
           <View style={styles.pendingCountRed}>
@@ -108,7 +102,7 @@ export default function AdminDashboardScreen() {
 
         <TouchableOpacity
           style={styles.pendingRed}
-          onPress={() => navigation.navigate("AdminDisbursementScreen")}
+          onPress={() => navigation.navigate("AdminDisbursementScreen" as never)}
         >
           <Text style={styles.pendingTextLight}>Pending Disbursement</Text>
           <View style={styles.pendingCountLight}>
@@ -119,35 +113,33 @@ export default function AdminDashboardScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* ====================== RADIAL RINGS ====================== */}
+      {/* STATUS RINGS */}
       <View style={styles.panel}>
         <Text style={styles.panelTitle}>Loan Status</Text>
 
         <View style={styles.ringRow}>
           <RadialRing
-            progress={pct(stats.loanStatusDistribution.paidAmount)}
+            progress={pct(paid)}
             label="Paid"
-            amount={stats.loanStatusDistribution.paidAmount}
+            amount={paid}
             colors={{ start: "#19d06b", end: "#00c853" }}
           />
-
           <RadialRing
-            progress={pct(stats.loanStatusDistribution.unpaidAmount)}
+            progress={pct(unpaid)}
             label="Unpaid"
-            amount={stats.loanStatusDistribution.unpaidAmount}
+            amount={unpaid}
             colors={{ start: "#4facfe", end: "#00c6fb" }}
           />
-
           <RadialRing
-            progress={pct(stats.loanStatusDistribution.overdueAmount)}
+            progress={pct(overdue)}
             label="Overdue"
-            amount={stats.loanStatusDistribution.overdueAmount}
+            amount={overdue}
             colors={{ start: "#ff6b6b", end: "#ff3b30" }}
           />
         </View>
       </View>
 
-      {/* ====================== PAYMENT OVERVIEW — 4 WEEKS ====================== */}
+      {/* 4-WEEK OVERVIEW */}
       <View style={styles.panel}>
         <Text style={styles.panelTitle}>Payment Overview (Last 4 Weeks)</Text>
 
@@ -155,16 +147,10 @@ export default function AdminDashboardScreen() {
           data={{
             labels: stats.paymentOverview4.labels,
             datasets: [
-              {
-                data: stats.paymentOverview4.expected,
-                color: () => "rgba(0,122,255,1)", // blue
-              },
-              {
-                data: stats.paymentOverview4.actual,
-                color: () => "rgba(52,199,89,1)", // green
-              },
+              { data: stats.paymentOverview4.expected, color: () => "#007AFF" },
+              { data: stats.paymentOverview4.actual, color: () => "#34C759" },
             ],
-            legend: ["Collectibles (Expected)", "Payments (Actual)"],
+            legend: ["Expected", "Actual"],
           }}
           width={CHART_WIDTH}
           height={220}
@@ -181,25 +167,9 @@ export default function AdminDashboardScreen() {
           bezier
           style={{ borderRadius: 12 }}
         />
-
-        <View style={{ marginTop: 10 }}>
-          <Text style={styles.legend}>
-            🟦 Collectibles — ₱{" "}
-            {stats.paymentOverview4.expected
-              .reduce((a: number, b: number) => a + b, 0)
-              .toLocaleString()}
-          </Text>
-
-          <Text style={styles.legend}>
-            🟩 Payments — ₱{" "}
-            {stats.paymentOverview4.actual
-              .reduce((a: number, b: number) => a + b, 0)
-              .toLocaleString()}
-          </Text>
-        </View>
       </View>
 
-      {/* ====================== WEEKLY COLLECTIONS ====================== */}
+      {/* WEEKLY COLLECTIONS */}
       <View style={styles.panel}>
         <Text style={styles.panelTitle}>Collections — Last 7 Days</Text>
 
@@ -212,18 +182,17 @@ export default function AdminDashboardScreen() {
           height={220}
           withInnerLines={false}
           withOuterLines={false}
-          showValuesOnTopOfBars={false}
           chartConfig={{
             backgroundGradientFrom: "#fff",
             backgroundGradientTo: "#fff",
-            color: () => "rgba(0,122,255,1)",
+            color: () => "#007AFF",
             labelColor: () => "#666",
           }}
           style={{ borderRadius: 12 }}
         />
       </View>
 
-      {/* ====================== PAYMENT BEHAVIOR ====================== */}
+      {/* PAYMENT BEHAVIOR */}
       <View style={styles.panel}>
         <Text style={styles.panelTitle}>Payment Behavior — On-Time vs Late</Text>
 
@@ -231,19 +200,13 @@ export default function AdminDashboardScreen() {
           data={{
             labels: stats.paymentBehavior.labels,
             datasets: [
-              {
-                data: stats.paymentBehavior.onTime,
-                color: () => "#0A84FF", // blue
-              },
-              {
-                data: stats.paymentBehavior.late,
-                color: () => "#FF3B30", // red
-              },
+              { data: stats.paymentBehavior.onTime, color: () => "#0A84FF" },
+              { data: stats.paymentBehavior.late, color: () => "#FF3B30" },
             ],
-            legend: ["On-Time", "Late"],
+            legend: ["On Time", "Late"],
           }}
           width={CHART_WIDTH}
-          height={240}
+          height={230}
           fromZero
           withInnerLines={false}
           withOuterLines={false}
@@ -257,23 +220,23 @@ export default function AdminDashboardScreen() {
         />
       </View>
 
-      {/* ====================== CASHFLOW — 12 WEEKS ====================== */}
+      {/* CASHFLOW */}
       <View style={styles.panel}>
         <Text style={styles.panelTitle}>Cashflow — Last 12 Weeks</Text>
 
         <LineChart
           data={{
             labels: stats.cashflow.labels.map((l: string, i: number) =>
-              i % 2 === 0 ? l : "" // show every 2nd label
+              i % 2 === 0 ? l : ""
             ),
             datasets: [
               { data: stats.cashflow.repaid, color: () => "#0A84FF" },
               { data: stats.cashflow.disbursed, color: () => "#FF3B30" },
             ],
-            legend: ["Repayments", "Disbursements"],
+            legend: ["Repaid", "Disbursed"],
           }}
           width={CHART_WIDTH}
-          height={230}
+          height={220}
           withInnerLines={false}
           withOuterLines={false}
           yAxisSuffix="₱"
@@ -288,33 +251,16 @@ export default function AdminDashboardScreen() {
         />
       </View>
 
-      {/* Spacer */}
       <View style={{ height: 80 }} />
     </ScrollView>
   );
 }
 
-/* ====================================================================
- * STYLES
- * ==================================================================== */
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    padding: 12,
-    backgroundColor: "#f3f6fa",
-  },
+  container: { flex: 1, padding: 12, backgroundColor: "#f3f6fa" },
+  center: { flex: 1, justifyContent: "center", alignItems: "center" },
 
-  center: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-
-  statsRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-  },
-
+  statsRow: { flexDirection: "row", justifyContent: "space-between" },
   statCard: {
     flex: 1,
     backgroundColor: "#fff",
@@ -323,34 +269,13 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     elevation: 3,
   },
+  statLabel: { fontSize: 13, color: "#6b7280", fontWeight: "600" },
+  statValue: { fontSize: 22, fontWeight: "900", color: "#0071b2", marginTop: 6 },
+  statFoot: { fontSize: 11, color: "#9aa4b2", marginTop: 6 },
 
-  statLabel: {
-    fontSize: 13,
-    color: "#6b7280",
-    fontWeight: "600",
-  },
+  rejectedCard: { backgroundColor: "#ff4d4d" },
 
-  statValue: {
-    fontSize: 22,
-    fontWeight: "900",
-    color: "#0071b2",
-    marginTop: 6,
-  },
-
-  statFoot: {
-    marginTop: 6,
-    fontSize: 11,
-    color: "#9aa4b2",
-  },
-
-  rejectedCard: {
-    backgroundColor: "#ff4d4d",
-  },
-
-  pendingContainer: {
-    marginTop: 18,
-  },
-
+  pendingContainer: { marginTop: 18 },
   pendingYellow: {
     backgroundColor: "#FFC107",
     padding: 12,
@@ -360,7 +285,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginBottom: 10,
   },
-
   pendingRed: {
     backgroundColor: "#ff3b30",
     padding: 12,
@@ -369,67 +293,27 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     alignItems: "center",
   },
-
-  pendingTextDark: {
-    fontSize: 15,
-    fontWeight: "700",
-    color: "#000",
-  },
-
-  pendingTextLight: {
-    fontSize: 15,
-    fontWeight: "700",
-    color: "#fff",
-  },
-
+  pendingTextDark: { fontSize: 15, fontWeight: "700", color: "#000" },
+  pendingTextLight: { fontSize: 15, fontWeight: "700", color: "#fff" },
   pendingCountRed: {
     backgroundColor: "#ff3b30",
     paddingHorizontal: 10,
     paddingVertical: 6,
     borderRadius: 8,
   },
-
   pendingCountLight: {
     backgroundColor: "#fff",
     paddingHorizontal: 10,
     paddingVertical: 6,
     borderRadius: 8,
   },
+  pendingNumberLight: { color: "#fff", fontWeight: "800" },
+  pendingNumberRed: { color: "#ff3b30", fontWeight: "800" },
 
-  pendingNumberLight: {
-    color: "#fff",
-    fontWeight: "800",
-  },
+  panel: { backgroundColor: "#fff", padding: 16, borderRadius: 14, marginTop: 20, elevation: 3 },
+  panelTitle: { fontSize: 18, fontWeight: "800", marginBottom: 12 },
 
-  pendingNumberRed: {
-    color: "#ff3b30",
-    fontWeight: "800",
-  },
+  ringRow: { flexDirection: "row", justifyContent: "space-between" },
 
-  panel: {
-    backgroundColor: "#fff",
-    padding: 16,
-    borderRadius: 14,
-    marginTop: 20,
-    elevation: 3,
-  },
-
-  panelTitle: {
-    fontSize: 18,
-    fontWeight: "800",
-    color: "#111",
-    marginBottom: 12,
-  },
-
-  ringRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-  },
-
-  legend: {
-    fontSize: 14,
-    color: "#333",
-    marginVertical: 2,
-    fontWeight: "600",
-  },
+  legend: { fontSize: 14, fontWeight: "600", marginVertical: 2 },
 });

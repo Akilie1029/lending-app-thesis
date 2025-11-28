@@ -1,73 +1,152 @@
 // src/navigation/AdminDrawerNavigator.tsx
-
 import React from "react";
 import { createDrawerNavigator } from "@react-navigation/drawer";
+import Icon from "react-native-vector-icons/Ionicons";
 
-// Custom Admin Drawer UI
-import AdminDrawer from "../components/AdminDrawer";
-
-// Admin Screens
 import AdminDashboardScreen from "../screens/AdminDashboardScreen";
 import AdminLoanApprovalScreen from "../screens/AdminLoanApprovalScreen";
 import AdminDisbursementScreen from "../screens/AdminDisbursementScreen";
-import AdminBorrowerListScreen from "../screens/AdminBorrowerListScreen";
 import AdminLoansListScreen from "../screens/AdminLoansListScreen";
-import AdminCollectionsScreen from "../screens/AdminCollectionsScreen";
+
+import { View, Text, TouchableOpacity, StyleSheet, Alert } from "react-native";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
 const Drawer = createDrawerNavigator();
 
-export default function AdminDrawerNavigator() {
+// Custom Drawer Header
+function DrawerHeader() {
+  return (
+    <View style={styles.header}>
+      <Text style={styles.headerTitle}>KAURta Admin</Text>
+      <Text style={styles.headerSubtitle}>Management Panel</Text>
+    </View>
+  );
+}
+
+function LogoutButton({ navigation }: any) {
+  const handleLogout = () => {
+    Alert.alert("Logout", "Are you sure?", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Logout",
+        style: "destructive",
+        onPress: async () => {
+          await AsyncStorage.removeItem("userToken");
+          navigation.reset({
+            index: 0,
+            routes: [{ name: "Login" }],
+          });
+        },
+      },
+    ]);
+  };
+
+  return (
+    <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout}>
+      <Icon name="log-out-outline" size={22} color="#ff3b30" />
+      <Text style={styles.logoutText}>Logout</Text>
+    </TouchableOpacity>
+  );
+}
+
+export default function AdminDrawerNavigator({ navigation }: any) {
   return (
     <Drawer.Navigator
-      drawerContent={(props) => <AdminDrawer {...props} />}
       screenOptions={{
-        headerShown: false,
-        drawerType: "front",
-        drawerActiveTintColor: "#0A9EFA",
-        drawerLabelStyle: { fontSize: 16, fontWeight: "600" },
+        header: () => <DrawerHeader />,
+        drawerActiveBackgroundColor: "#dff3ff",
+        drawerActiveTintColor: "#169AF9",
+        drawerLabelStyle: { fontWeight: "600" },
       }}
     >
-      {/* Dashboard */}
+      {/* DASHBOARD */}
       <Drawer.Screen
         name="AdminDashboard"
         component={AdminDashboardScreen}
-        options={{ drawerLabel: "Dashboard" }}
+        options={{
+          drawerLabel: "Dashboard",
+          drawerIcon: ({ color }) => (
+            <Icon name="grid-outline" size={20} color={color} />
+          ),
+        }}
       />
 
-      {/* Pending Loan Approval */}
+      {/* LOAN APPROVALS */}
       <Drawer.Screen
         name="AdminLoanApprovalScreen"
         component={AdminLoanApprovalScreen}
-        options={{ drawerLabel: "Pending Loan Approval" }}
+        options={{
+          drawerLabel: "Loan Approvals",
+          drawerIcon: ({ color }) => (
+            <Icon name="clipboard-outline" size={20} color={color} />
+          ),
+        }}
       />
 
-      {/* Pending Disbursement */}
+      {/* DISBURSEMENTS */}
       <Drawer.Screen
         name="AdminDisbursementScreen"
         component={AdminDisbursementScreen}
-        options={{ drawerLabel: "Pending Disbursement" }}
+        options={{
+          drawerLabel: "Disbursement",
+          drawerIcon: ({ color }) => (
+            <Icon name="cash-outline" size={20} color={color} />
+          ),
+        }}
       />
 
-      {/* Borrowers */}
-      <Drawer.Screen
-        name="AdminBorrowerListScreen"
-        component={AdminBorrowerListScreen}
-        options={{ drawerLabel: "Borrowers" }}
-      />
-
-      {/* Loans List */}
+      {/* OPTIONAL — LOAN LIST */}
       <Drawer.Screen
         name="AdminLoansListScreen"
         component={AdminLoansListScreen}
-        options={{ drawerLabel: "Loans" }}
+        options={{
+          drawerLabel: "All Loans",
+          drawerIcon: ({ color }) => (
+            <Icon name="document-text-outline" size={20} color={color} />
+          ),
+        }}
       />
 
-      {/* Collections */}
+      {/* LOGOUT BUTTON */}
       <Drawer.Screen
-        name="AdminCollectionsScreen"
-        component={AdminCollectionsScreen}
-        options={{ drawerLabel: "Collections" }}
+        name="AdminLogout"
+        children={() => <LogoutButton navigation={navigation} />}
+        options={{
+          drawerLabel: "Logout",
+          drawerIcon: () => (
+            <Icon name="log-out-outline" size={20} color="#ff3b30" />
+          ),
+        }}
       />
     </Drawer.Navigator>
   );
 }
+
+const styles = StyleSheet.create({
+  header: {
+    padding: 20,
+    backgroundColor: "#169AF9",
+    paddingTop: 50,
+  },
+  headerTitle: {
+    fontSize: 22,
+    fontWeight: "800",
+    color: "#fff",
+  },
+  headerSubtitle: {
+    color: "#e6f7ff",
+    marginTop: 4,
+    fontSize: 13,
+  },
+  logoutBtn: {
+    flexDirection: "row",
+    padding: 14,
+    alignItems: "center",
+    gap: 10,
+  },
+  logoutText: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: "#ff3b30",
+  },
+});

@@ -1,6 +1,5 @@
-// ✅ Responsive Login Screen with Role-Based Routing
-
-import React, { useState } from 'react';
+// src/screens/LoginScreen.tsx
+import React, { useState } from "react";
 import {
   View,
   Text,
@@ -10,101 +9,93 @@ import {
   Image,
   Alert,
   Dimensions,
-} from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import LinearGradient from 'react-native-linear-gradient';
-import axios from 'axios';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { LoginScreenProps } from '../../App';
+} from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
+import LinearGradient from "react-native-linear-gradient";
+import axios from "axios";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { LoginScreenProps } from "../../App";
+import { API_BASE } from "../config";
 
-// Screen dimensions
-const { width, height } = Dimensions.get('window');
-
-// Responsive scale helpers
+// Responsive helpers
+const { width, height } = Dimensions.get("window");
 const scale = (size: number) => (width / 375) * size;
 const verticalScale = (size: number) => (height / 812) * size;
 const moderateScale = (size: number, factor = 0.5) =>
   size + (scale(size) - size) * factor;
 
 const LoginScreen = ({ navigation }: LoginScreenProps) => {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [loading, setLoading] = useState(false);
 
-  // =================================================================
-  //                      HANDLE LOGIN
-  // =================================================================
   const handleLogin = async () => {
     if (!email || !password) {
-      Alert.alert('Error', 'Please enter both email and password.');
+      Alert.alert("Error", "Please enter both email and password.");
       return;
     }
 
     try {
-      console.log("🔐 Logging in:", email);
+      setLoading(true);
 
-      // 1️⃣ Login → get token
-      const response = await axios.post('http://192.168.1.222:5001/api/auth/login', {
+      // 1) Login to get token
+      console.log("LOGIN → API_BASE:", API_BASE);
+      const loginRes = await axios.post(`${API_BASE}/auth/login`, {
         email,
         password,
       });
 
-      const { token } = response.data;
+      const token = loginRes.data?.token;
+      if (!token) {
+        throw new Error("No token returned from server.");
+      }
 
-      // 2️⃣ Save token
-      await AsyncStorage.setItem('userToken', token);
-      console.log("💾 Token stored:", token);
+      // Save token
+      await AsyncStorage.setItem("userToken", token);
 
-      // 3️⃣ Fetch user details (for role)
-      const me = await axios.get('http://192.168.1.222:5001/api/auth/me', {
+      // 2) Fetch user details (me)
+      const meRes = await axios.get(`${API_BASE}/auth/me`, {
         headers: { Authorization: `Bearer ${token}` },
       });
 
-      console.log("👤 Logged-in user:", me.data);
+      const me = meRes.data || {};
 
-// 4️⃣ ROUTE BASED ON ROLE (case-insensitive)
-if (me.data.role?.toUpperCase() === "ADMIN") {
-  console.log("🛡️ Admin detected → redirecting to AdminDrawer");
-
-  navigation.reset({
-    index: 0,
-    routes: [{ name: "AdminDrawer" }],
-  });
-
-} else {
-  console.log("👤 Borrower detected → redirecting to Home");
-
-  navigation.reset({
-    index: 0,
-    routes: [{ name: "Home" }],
-  });
-}
-
-
+      // Route based on role (case-insensitive)
+      const role = (me.role || "").toString().toLowerCase();
+      if (role === "admin") {
+        navigation.reset({
+          index: 0,
+          routes: [{ name: "AdminDrawer" as any }],
+        });
+      } else {
+        navigation.reset({
+          index: 0,
+          routes: [{ name: "Home" as any }],
+        });
+      }
     } catch (error: any) {
-      console.log("❌ Login Error:", error.response?.data || error.message);
-      Alert.alert('Login Failed', error.response?.data?.error || 'Invalid credentials');
+      console.log("Login error:", error?.response?.data || error.message);
+      Alert.alert(
+        "Login Failed",
+        error?.response?.data?.error || error?.response?.data?.message || "Invalid credentials"
+      );
+    } finally {
+      setLoading(false);
     }
   };
 
-  // =================================================================
-  //                      UI / RENDER
-  // =================================================================
   return (
     <LinearGradient
-      colors={['#169AF9', '#37AAF2']}
+      colors={["#169AF9", "#37AAF2"]}
       start={{ x: 0, y: 0.04 }}
       end={{ x: 0, y: 1 }}
       style={styles.gradientBackground}
     >
       <SafeAreaView style={styles.container}>
-
         {/* Blue header */}
         <View style={styles.blueHeader}>
           <View style={styles.logoWrapper}>
-            <Image
-              source={require('../../assets/logo.png')}
-              style={styles.logo}
-            />
+            <Image source={require("../../assets/logo.png")} style={styles.logo} />
           </View>
         </View>
 
@@ -134,8 +125,8 @@ if (me.data.role?.toUpperCase() === "ADMIN") {
           />
 
           {/* Login Button */}
-          <TouchableOpacity style={styles.button} onPress={handleLogin}>
-            <Text style={styles.buttonText}>Login</Text>
+          <TouchableOpacity style={styles.button} onPress={handleLogin} disabled={loading}>
+            <Text style={styles.buttonText}>{loading ? "Logging in..." : "Login"}</Text>
           </TouchableOpacity>
 
           {/* Footer */}
@@ -143,7 +134,7 @@ if (me.data.role?.toUpperCase() === "ADMIN") {
 
           <TouchableOpacity
             style={styles.signupButton}
-            onPress={() => navigation.navigate('Register')}
+            onPress={() => navigation.navigate("Register" as any)}
           >
             <Text style={styles.signupButtonText}>Sign Up</Text>
           </TouchableOpacity>
@@ -155,10 +146,6 @@ if (me.data.role?.toUpperCase() === "ADMIN") {
 
 export default LoginScreen;
 
-// =================================================================
-//                         STYLE SHEET
-// =================================================================
-
 const styles = StyleSheet.create({
   gradientBackground: {
     flex: 1,
@@ -166,52 +153,52 @@ const styles = StyleSheet.create({
 
   container: {
     flex: 1,
-    alignItems: 'center',
-    justifyContent: 'flex-start',
+    alignItems: "center",
+    justifyContent: "flex-start",
   },
 
   blueHeader: {
-    width: '100%',
+    width: "100%",
     height: height * 0.18,
-    justifyContent: 'flex-end',
-    alignItems: 'center',
+    justifyContent: "flex-end",
+    alignItems: "center",
     borderBottomLeftRadius: scale(60),
     borderBottomRightRadius: scale(60),
-    overflow: 'hidden',
+    overflow: "hidden",
   },
 
   logoWrapper: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: "#FFFFFF",
     borderRadius: scale(60),
     elevation: 6,
-    shadowColor: '#000',
+    shadowColor: "#000",
     shadowOpacity: 0.1,
     shadowRadius: 8,
     shadowOffset: { width: 0, height: 4 },
-    position: 'relative',
+    position: "relative",
     marginTop: verticalScale(-40),
   },
 
   logo: {
     width: scale(230),
     height: verticalScale(180),
-    resizeMode: 'contain',
+    resizeMode: "contain",
     marginHorizontal: scale(20),
     bottom: verticalScale(-30),
   },
 
   formContainer: {
-    position: 'absolute',
+    position: "absolute",
     bottom: verticalScale(20),
-    backgroundColor: '#fff',
-    width: '95%',
+    backgroundColor: "#fff",
+    width: "95%",
     height: height * 0.75,
     borderRadius: scale(30),
-    alignItems: 'center',
+    alignItems: "center",
     paddingHorizontal: scale(30),
     paddingTop: verticalScale(120),
     elevation: 10,
-    shadowColor: '#000',
+    shadowColor: "#000",
     shadowOpacity: 0.1,
     shadowRadius: 8,
     shadowOffset: { width: 0, height: -2 },
@@ -219,16 +206,16 @@ const styles = StyleSheet.create({
 
   title: {
     fontSize: moderateScale(26),
-    fontWeight: '700',
-    color: '#007BFF',
+    fontWeight: "700",
+    color: "#007BFF",
     marginBottom: verticalScale(30),
   },
 
   input: {
-    width: '100%',
+    width: "100%",
     height: verticalScale(50),
     borderWidth: 1.5,
-    borderColor: '#007BFF',
+    borderColor: "#007BFF",
     borderRadius: scale(12),
     paddingHorizontal: scale(15),
     marginBottom: verticalScale(16),
@@ -236,42 +223,42 @@ const styles = StyleSheet.create({
   },
 
   button: {
-    width: '50%',
-    backgroundColor: '#0A9EFA',
+    width: "50%",
+    backgroundColor: "#0A9EFA",
     borderRadius: scale(15),
     paddingVertical: verticalScale(10),
-    alignItems: 'center',
+    alignItems: "center",
     marginTop: verticalScale(12),
     borderWidth: 2,
-    borderColor: '#0367A6',
+    borderColor: "#0367A6",
   },
 
   buttonText: {
-    color: '#fff',
+    color: "#fff",
     fontSize: moderateScale(16),
-    fontWeight: '700',
+    fontWeight: "700",
   },
 
   footerText: {
     marginTop: verticalScale(100),
-    color: '#444',
+    color: "#444",
     fontSize: moderateScale(14),
   },
 
   signupButton: {
-    width: '40%',
-    backgroundColor: '#0A9EFA',
+    width: "40%",
+    backgroundColor: "#0A9EFA",
     borderRadius: scale(12),
     paddingVertical: verticalScale(5),
-    alignItems: 'center',
+    alignItems: "center",
     marginTop: verticalScale(15),
     borderWidth: 2,
-    borderColor: '#0367A6',
+    borderColor: "#0367A6",
   },
 
   signupButtonText: {
-    color: '#fff',
+    color: "#fff",
     fontSize: moderateScale(16),
-    fontWeight: '700',
+    fontWeight: "700",
   },
 });

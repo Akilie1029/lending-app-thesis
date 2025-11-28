@@ -12,20 +12,23 @@ import {
 import axios from "axios";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { format } from "date-fns";
-
-// ✅ ADDED — new header component (back arrow + blue bar)
 import SmallHeader from "../components/SmallHeader";
+import { normalizeLoan } from "../utils/normalizeLoan";
+import { BASE_URL } from "../config";
 
 type LoanRow = {
   id: string;
   user_id: string;
   full_name?: string;
-  amount_requested: number;
+  amount_requested?: number | string;
+  amount?: number | string;
   purpose: string;
+  days?: number | null;
+  status: string;
   created_at: string;
 };
 
-export default function AdminDisbursementScreen({ navigation }) {
+export default function AdminDisbursementScreen() {
   const [loading, setLoading] = useState(true);
   const [loans, setLoans] = useState<LoanRow[]>([]);
   const [processing, setProcessing] = useState<{ [key: string]: boolean }>({});
@@ -34,32 +37,33 @@ export default function AdminDisbursementScreen({ navigation }) {
     loadLoans();
   }, []);
 
-  // ============================================================
-  // 📌 LOAD PENDING DISBURSEMENTS
-  // ============================================================
+  // ------------------------------
+  // load loans waiting disbursement
+  // ------------------------------
   const loadLoans = async () => {
     setLoading(true);
+
     try {
       const token = await AsyncStorage.getItem("userToken");
 
       const res = await axios.get(
-        "http://192.168.1.222:5001/api/admin/disbursements",
-        {
-          headers: { Authorization: `Bearer ${token}` },
-        }
+        `${BASE_URL}/api/admin/disbursements`,
+        { headers: { Authorization: `Bearer ${token}` } }
       );
 
-      setLoans(res.data || []);
+      const normalized = (res.data || []).map((r: any) => normalizeLoan(r));
+      setLoans(normalized);
     } catch (err) {
       console.error("Error loading disbursements:", err);
       Alert.alert("Error", "Failed to load disbursement list.");
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
-  // ============================================================
-  // 📌 DISBURSE LOAN
-  // ============================================================
+  // ------------------------------
+  // DISBURSE
+  // ------------------------------
   const disburseLoan = async (loanId: string) => {
     Alert.alert("Confirm", "Disburse this loan now?", [
       { text: "Cancel", style: "cancel" },
@@ -72,14 +76,12 @@ export default function AdminDisbursementScreen({ navigation }) {
             const token = await AsyncStorage.getItem("userToken");
 
             await axios.post(
-              `http://192.168.1.222:5001/api/admin/disburse/${loanId}`,
+              `${BASE_URL}/api/admin/disburse/${loanId}`,
               {},
               { headers: { Authorization: `Bearer ${token}` } }
             );
 
             Alert.alert("Success", "Loan disbursed successfully!");
-
-            // Remove from list (instantly updates UI)
             setLoans((cur) => cur.filter((l) => l.id !== loanId));
           } catch (err) {
             console.error("Disbursement error:", err);
@@ -92,15 +94,12 @@ export default function AdminDisbursementScreen({ navigation }) {
     ]);
   };
 
-  // ============================================================
-  // 📌 RENDER LOAN CARD
-  // ============================================================
   const renderLoan = ({ item }: { item: LoanRow }) => (
     <View style={styles.card}>
       <Text style={styles.name}>{item.full_name || "Unknown Borrower"}</Text>
 
       <Text style={styles.amount}>
-        ₱ {Number(item.amount_requested).toLocaleString()}
+        ₱ {Number(item.amount ?? item.amount_requested ?? 0).toLocaleString()}
       </Text>
 
       <Text style={styles.purpose}>Purpose: {item.purpose}</Text>
@@ -123,28 +122,22 @@ export default function AdminDisbursementScreen({ navigation }) {
     </View>
   );
 
-  // ============================================================
-  // 📌 LOADING STATE
-  // ============================================================
+  // ------------------------------
+  // RENDER
+  // ------------------------------
   if (loading) {
     return (
       <View style={styles.center}>
-        {/* ✅ ADDED — header even during loading */}
         <SmallHeader title="Disbursement" />
         <ActivityIndicator size="large" style={{ marginTop: 20 }} />
       </View>
     );
   }
 
-  // ============================================================
-  // 📌 EMPTY STATE
-  // ============================================================
   if (!loans.length) {
     return (
       <View style={styles.center}>
-        {/* ✅ ADDED — header on empty state */}
         <SmallHeader title="Disbursement" />
-
         <Text style={{ color: "#666", marginTop: 20 }}>
           No loans awaiting disbursement.
         </Text>
@@ -152,12 +145,8 @@ export default function AdminDisbursementScreen({ navigation }) {
     );
   }
 
-  // ============================================================
-  // 📌 MAIN SCREEN WITH HEADER (NEW)
-  // ============================================================
   return (
     <View style={{ flex: 1 }}>
-      {/* ✅ ADDED — beautiful blue header with back arrow */}
       <SmallHeader title="Disbursement" />
 
       <FlatList
@@ -175,10 +164,10 @@ const styles = StyleSheet.create({
 
   card: {
     backgroundColor: "#fff",
-    marginVertical: 8,
     padding: 12,
     borderRadius: 10,
     elevation: 3,
+    marginVertical: 8,
   },
 
   name: { fontSize: 16, fontWeight: "700" },
@@ -187,10 +176,10 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: "#007aff",
     fontWeight: "700",
-    marginTop: 4,
+    marginTop: 6,
   },
 
-  purpose: { marginTop: 6, color: "#444" },
+  purpose: { color: "#444", marginTop: 4 },
 
   date: { color: "#777", marginTop: 4 },
 

@@ -1,25 +1,48 @@
+// src/screens/CardPayScreen.tsx
 import React, { useState } from "react";
-import { View, Text, TextInput, StyleSheet, TouchableOpacity, Alert, ActivityIndicator } from "react-native";
+import {
+  View,
+  Text,
+  StyleSheet,
+  TextInput,
+  TouchableOpacity,
+  Alert,
+  ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
+} from "react-native";
 import LinearGradient from "react-native-linear-gradient";
 import Icon from "react-native-vector-icons/Ionicons";
+import { useRoute, useNavigation } from "@react-navigation/native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import axios from "axios";
+import { API_BASE } from "../config";
 
-const API_BASE = "http://192.168.1.222:5001/api";
+export default function CardPayScreen() {
+  const route = useRoute<any>();
+  const navigation = useNavigation<any>();
 
-export default function CardPayScreen({ route, navigation }: any) {
-  const { loan, amount } = route.params;
+  const loan = route.params?.loan;
+  const amount = Number(route.params?.amount ?? loan?.daily_payment ?? 0);
 
-  const [card, setCard] = useState("");
-  const [exp, setExp] = useState("");
+  const [cardNumber, setCardNumber] = useState("");
+  const [expDate, setExpDate] = useState("");
   const [cvv, setCvv] = useState("");
   const [loading, setLoading] = useState(false);
 
+  if (!loan) {
+    return (
+      <View style={styles.center}>
+        <Text>No loan selected.</Text>
+      </View>
+    );
+  }
+
   const handlePay = async () => {
-    if (card.length < 16)
-      return Alert.alert("Card Number Error", "Enter a valid card number.");
-    if (!exp) return Alert.alert("Missing Expiry Date", "Enter expiry date.");
-    if (cvv.length < 3) return Alert.alert("Missing CVV", "Enter CVV.");
+    if (cardNumber.length < 12 || expDate.length < 4 || cvv.length < 3) {
+      Alert.alert("Invalid Input", "Please enter valid card details.");
+      return;
+    }
 
     try {
       setLoading(true);
@@ -30,14 +53,19 @@ export default function CardPayScreen({ route, navigation }: any) {
         {
           amount,
           method: "card",
-          metadata: { card, exp, cvv },
+          metadata: {
+            cardNumber,
+            expDate,
+            cvv,
+            simulated: true,
+          },
         },
         { headers: { Authorization: `Bearer ${token}` } }
       );
 
       setLoading(false);
 
-      Alert.alert("Payment Success", "Card payment recorded.", [
+      Alert.alert("Payment Successful", "Card payment recorded.", [
         {
           text: "OK",
           onPress: () =>
@@ -48,95 +76,98 @@ export default function CardPayScreen({ route, navigation }: any) {
         },
       ]);
     } catch (err: any) {
+      console.error("Card payment error", err?.response?.data || err);
+
       setLoading(false);
       Alert.alert(
-        "Payment Failed",
-        err?.response?.data?.message || "Unable to complete card payment."
+        "Failed",
+        err?.response?.data?.message || "Unable to complete payment."
       );
     }
   };
 
   return (
-    <View style={styles.container}>
+    <KeyboardAvoidingView
+      style={{ flex: 1, backgroundColor: "#f6f7fb" }}
+      behavior={Platform.OS === "ios" ? "padding" : undefined}
+    >
       <LinearGradient colors={["#169AF9", "#37AAF2"]} style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()}>
           <Icon name="arrow-back" size={26} color="#fff" />
         </TouchableOpacity>
+
         <Text style={styles.headerTitle}>Card Payment</Text>
-        <View style={{ width: 26 }} />
+        <View style={{ width: 44 }} />
       </LinearGradient>
 
-      <View style={styles.card}>
+      <View style={styles.container}>
         <Text style={styles.label}>Amount to Pay</Text>
-        <Text style={styles.amount}>₱ {amount.toLocaleString()}</Text>
+        <Text style={styles.value}>₱ {amount.toLocaleString()}</Text>
 
-        <Text style={[styles.label, { marginTop: 15 }]}>Card Number</Text>
+        <Text style={styles.inputLabel}>Card Number</Text>
         <TextInput
-          placeholder="xxxx xxxx xxxx xxxx"
+          placeholder="1234 5678 9012 3456"
           keyboardType="numeric"
-          maxLength={16}
-          value={card}
-          onChangeText={setCard}
+          value={cardNumber}
+          onChangeText={setCardNumber}
           style={styles.input}
         />
 
-        <Text style={[styles.label, { marginTop: 15 }]}>Expiry (MM/YY)</Text>
-        <TextInput placeholder="MM/YY" value={exp} onChangeText={setExp} style={styles.input} />
+        <Text style={styles.inputLabel}>Expiry Date (MM/YY)</Text>
+        <TextInput
+          placeholder="08/28"
+          value={expDate}
+          onChangeText={setExpDate}
+          style={styles.input}
+        />
 
-        <Text style={[styles.label, { marginTop: 15 }]}>CVV</Text>
+        <Text style={styles.inputLabel}>CVV</Text>
         <TextInput
           placeholder="123"
           keyboardType="numeric"
-          maxLength={4}
+          secureTextEntry
           value={cvv}
           onChangeText={setCvv}
           style={styles.input}
         />
 
-        <TouchableOpacity style={styles.button} onPress={handlePay}>
-          <Text style={styles.buttonText}>Pay Now</Text>
+        <TouchableOpacity style={styles.payBtn} onPress={handlePay} disabled={loading}>
+          {loading ? (
+            <ActivityIndicator color="#fff" />
+          ) : (
+            <Text style={styles.payText}>Confirm Card Payment</Text>
+          )}
         </TouchableOpacity>
-
-        {loading && <ActivityIndicator size="large" style={{ marginTop: 20 }} />}
       </View>
-    </View>
+    </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#f6f7fb" },
-  header: {
-    paddingTop: 50,
-    paddingBottom: 18,
-    paddingHorizontal: 16,
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-  },
-  headerTitle: { fontSize: 20, fontWeight: "700", color: "#fff" },
-  card: {
-    backgroundColor: "#fff",
-    margin: 20,
-    padding: 20,
-    borderRadius: 16,
-    borderWidth: 2,
-    borderColor: "#169AF9",
-  },
-  label: { fontSize: 14, color: "#666" },
-  amount: { fontSize: 32, fontWeight: "800" },
+  header: { paddingTop: 50, paddingBottom: 20, paddingHorizontal: 16, flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  headerTitle: { color: "#fff", fontSize: 20, fontWeight: "700" },
+
+  container: { padding: 20, marginTop: 20 },
+  label: { color: "#666" },
+  value: { fontSize: 28, fontWeight: "900", marginBottom: 20 },
+
+  inputLabel: { marginTop: 10, marginBottom: 4, color: "#444" },
   input: {
-    padding: 12,
-    borderWidth: 1.2,
-    borderColor: "#ccc",
+    backgroundColor: "#fff",
     borderRadius: 10,
-    marginTop: 6,
+    borderWidth: 1,
+    borderColor: "#ddd",
+    padding: 12,
   },
-  button: {
-    marginTop: 20,
+
+  payBtn: {
     backgroundColor: "#169AF9",
-    paddingVertical: 12,
+    paddingVertical: 14,
     borderRadius: 12,
     alignItems: "center",
+    marginTop: 24,
   },
-  buttonText: { color: "#fff", fontSize: 16, fontWeight: "700" },
+  payText: { color: "#fff", fontWeight: "800" },
+
+  center: { flex: 1, justifyContent: "center", alignItems: "center" },
 });

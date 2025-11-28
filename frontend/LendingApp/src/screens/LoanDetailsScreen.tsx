@@ -1,223 +1,328 @@
-import React from "react";
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from "react-native";
+// src/screens/LoanDetailsScreen.tsx
+import React, { useEffect, useState } from "react";
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  ActivityIndicator,
+  TouchableOpacity,
+  Image,
+  Linking,
+  Alert,
+} from "react-native";
 import LinearGradient from "react-native-linear-gradient";
-import { useRoute, useNavigation } from "@react-navigation/native";
 import Icon from "react-native-vector-icons/Ionicons";
+import { useRoute, useNavigation } from "@react-navigation/native";
+import axios from "axios";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { API_BASE } from "../config";
 
-const LoanDetailsScreen = () => {
+export default function LoanDetailsScreen() {
   const route = useRoute<any>();
   const navigation = useNavigation<any>();
-  const { loan } = route.params || {};
 
-  if (!loan) {
+  const passedLoan = route.params?.loan;
+  const passedLoanId = route.params?.loanId;
+
+  const [loan, setLoan] = useState<any>(passedLoan || null);
+  const [loading, setLoading] = useState<boolean>(!passedLoan);
+
+  const id = passedLoan?.id ?? passedLoanId;
+
+  useEffect(() => {
+    if (!id || passedLoan) return;
+
+    (async () => {
+      try {
+        setLoading(true);
+        const token = await AsyncStorage.getItem("userToken");
+        if (!token) throw new Error("Not authenticated");
+
+        const res = await axios.get(`${API_BASE}/loans/${id}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+
+        // backend may return { loan: {...} } or the loan object directly
+        const data = res.data?.loan ?? res.data;
+        setLoan(data);
+      } catch (err: any) {
+        console.error("Loan details error:", err?.response?.data || err.message);
+        Alert.alert("Error", "Unable to load loan details.");
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, [id, passedLoan]);
+
+  if (loading) {
     return (
-      <View style={styles.centered}>
-        <Text style={{ color: "#777", fontSize: 16 }}>No loan details available</Text>
+      <View style={styles.center}>
+        <ActivityIndicator size="large" color="#169AF9" />
       </View>
     );
   }
 
-  /** ================================
-   *  NORMALIZATION — supports ALL formats
-   * ================================ */
+  if (!loan) {
+    return (
+      <View style={styles.center}>
+        <Text style={{ color: "#666" }}>Loan not found.</Text>
+      </View>
+    );
+  }
 
-  const principal =
-    Number(loan.principal) ||
-    Number(loan.amount_requested) ||
-    Number(loan.disbursed_amount) ||
-    0;
+  const principal = Number(loan.principal ?? loan.amount_requested ?? 0);
+  const total = Number(loan.total_payable ?? 0);
+  const remaining = Number(loan.remaining_balance ?? 0);
+  const daily = Number(loan.daily_payment ?? 0);
 
-  const interest =
-    Number(loan.interest) ||
-    Number(principal * 0.2) ||
-    0;
+  const status = String(loan.status ?? "").toLowerCase();
 
-  const total_payable =
-    Number(loan.total_payable) ||
-    Number(principal + interest) ||
-    0;
+  const formatDate = (d?: string | null) => {
+    if (!d) return "—";
+    const dt = new Date(d);
+    if (isNaN(dt.getTime())) return "—";
+    return dt.toLocaleDateString();
+  };
 
-  const days =
-    Number(loan.days) ||
-    Number(loan.repayment_days) ||
-    30;
-
-  const daily_payment =
-    Number(loan.daily_payment) ||
-    Number(total_payable / days) ||
-    0;
-
-  const total_repaid =
-    Number(loan.total_repaid) ||
-    0;
-
-  const remaining_balance =
-    Number(loan.remaining_balance) ||
-    Number(total_payable - total_repaid);
-
-  const late_fees_total =
-    Number(loan.late_fees_total) || 0;
-
-  const days_remaining =
-    Number(loan.days_remaining) ||
-    Math.max(0, days - Math.floor(total_repaid / daily_payment));
-
-  const submittedDate =
-    loan.created_at ? new Date(loan.created_at) : null;
-
-  const approvedDate =
-    loan.disbursed_at ? new Date(loan.disbursed_at) : null;
-
-  const nextDue =
-    loan.latest_due_date ? new Date(loan.latest_due_date) : null;
-
-  const purpose = loan.purpose || "N/A";
-
-  const formatMoney = (v: number) =>
-    Number(v).toLocaleString(undefined, {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    });
-
-  /** ================================ */
+  const openUrl = async (url?: string | null) => {
+    if (!url) {
+      Alert.alert("Not available", "No URL to open.");
+      return;
+    }
+    const ok = await Linking.canOpenURL(url);
+    if (ok) {
+      Linking.openURL(url);
+    } else {
+      Alert.alert("Cannot open", "Unable to open this URL.");
+    }
+  };
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 40 }}>
-      {/* HEADER */}
-      <LinearGradient colors={["#169AF9", "#37AAF2"]} style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
+    <ScrollView style={{ flex: 1, backgroundColor: "#f6f7fb" }}>
+      <LinearGradient
+        colors={["#169AF9", "#37AAF2"]}
+        style={styles.header}
+      >
+        <TouchableOpacity onPress={() => navigation.goBack()}>
           <Icon name="arrow-back" size={26} color="#fff" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Loan Details</Text>
+        <View style={{ width: 44 }} />
       </LinearGradient>
 
-      {/* === LOAN SUMMARY === */}
-      <View style={styles.card}>
-        <Text style={styles.sectionTitle}>Loan Summary</Text>
+      <View style={styles.container}>
+        <View style={styles.card}>
+          <View style={styles.rowBetween}>
+            <Text style={styles.label}>Principal</Text>
+            <Text style={styles.smallLabel}>{formatDate(loan.created_at)}</Text>
+          </View>
+          <Text style={styles.value}>₱ {principal.toLocaleString()}</Text>
 
-        <DetailRow label="Loan Amount:" value={`₱ ${formatMoney(principal)}`} />
-        <DetailRow label="Interest Amount:" value={`₱ ${formatMoney(interest)}`} />
-        <DetailRow
-          label="Total Payable:"
-          value={`₱ ${formatMoney(total_payable)}`}
-          valueColor="#0077C8"
-        />
+          <View style={{ height: 10 }} />
 
-        <DetailRow label="Purpose:" value={purpose} />
+          <View style={styles.row}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.label}>Total Payable</Text>
+              <Text style={styles.smallValue}>₱ {total.toLocaleString()}</Text>
+            </View>
 
-        <DetailRow
-          label="Date Submitted:"
-          value={submittedDate ? submittedDate.toLocaleDateString() : "N/A"}
-        />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.label}>Daily Payment</Text>
+              <Text style={styles.smallValue}>₱ {daily.toLocaleString()}</Text>
+            </View>
+          </View>
 
-        <DetailRow
-          label="Date Approved:"
-          value={approvedDate ? approvedDate.toLocaleDateString() : "N/A"}
-        />
+          <View style={{ height: 10 }} />
 
-        <DetailRow
-          label="Status:"
-          value={String(loan.status).toUpperCase()}
-          valueColor={
-            loan.status === "approved"
-              ? "#00B050"
-              : loan.status === "pending"
-              ? "#F39C12"
-              : loan.status === "active"
-              ? "#169AF9"
-              : "#FF3B30"
-          }
-        />
-      </View>
+          <Text style={styles.label}>Remaining Balance</Text>
+          <Text style={[styles.value, { color: "#D62828" }]}>
+            ₱ {remaining.toLocaleString()}
+          </Text>
 
-      {/* === REPAYMENT BREAKDOWN === */}
-      <View style={styles.card}>
-        <Text style={styles.sectionTitle}>Repayment Breakdown</Text>
+          <View style={{ height: 10 }} />
 
-        <DetailRow
-          label="Daily Payment:"
-          value={`₱ ${formatMoney(daily_payment)}`}
-          valueColor="#0077C8"
-        />
+          <Text style={styles.label}>Status</Text>
+          <Text style={styles.smallValue}>{(loan.status ?? "—").toString().toUpperCase()}</Text>
 
-        <DetailRow label="Repayment Term:" value={`${days} days`} />
-        <DetailRow label="Days Remaining:" value={days_remaining} />
-        <DetailRow label="Days Completed:" value={days - days_remaining} />
+          <View style={{ height: 10 }} />
 
-        <DetailRow
-          label="Total Paid:"
-          value={`₱ ${formatMoney(total_repaid)}`}
-        />
+          <Text style={styles.label}>Purpose</Text>
+          <Text style={styles.small}>{loan.purpose ?? "—"}</Text>
 
-        <DetailRow
-          label="Remaining Balance:"
-          value={`₱ ${formatMoney(remaining_balance)}`}
-          valueColor="#0077C8"
-        />
+          <View style={{ height: 10 }} />
 
-        <DetailRow label="Late Fees:" value={`₱ ${formatMoney(late_fees_total)}`} />
+          <View style={styles.row}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.label}>Term</Text>
+              <Text style={styles.small}>{loan.days ?? "—"} days</Text>
+            </View>
 
-        <DetailRow
-          label="Next Due Date:"
-          value={nextDue ? nextDue.toLocaleDateString() : "N/A"}
-        />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.label}>Applied</Text>
+              <Text style={styles.small}>{formatDate(loan.created_at)}</Text>
+            </View>
+          </View>
+
+          {loan.disbursed_at ? (
+            <View style={{ marginTop: 8 }}>
+              <Text style={styles.label}>Disbursed At</Text>
+              <Text style={styles.small}>{formatDate(loan.disbursed_at)}</Text>
+            </View>
+          ) : null}
+
+          {loan.latest_due_date ? (
+            <View style={{ marginTop: 8 }}>
+              <Text style={styles.label}>Next Due</Text>
+              <Text style={styles.small}>{formatDate(loan.latest_due_date)}</Text>
+            </View>
+          ) : null}
+
+          {loan.last_payment_date ? (
+            <View style={{ marginTop: 8 }}>
+              <Text style={styles.label}>Last Payment</Text>
+              <Text style={styles.small}>{formatDate(loan.last_payment_date)}</Text>
+            </View>
+          ) : null}
+        </View>
+
+        {/* Documents */}
+        <View style={[styles.card, { marginTop: 12 }]}>
+          <Text style={[styles.sectionTitle]}>Documents</Text>
+
+          {/* Government ID */}
+          {loan.government_id_url ? (
+            <TouchableOpacity onPress={() => openUrl(loan.government_id_url)}>
+              <Image
+                source={{ uri: loan.government_id_url }}
+                style={styles.docPreview}
+                resizeMode="cover"
+              />
+              <Text style={styles.docLabel}>Government ID (tap to open)</Text>
+            </TouchableOpacity>
+          ) : (
+            <Text style={styles.small}>No government ID uploaded</Text>
+          )}
+
+          {/* Selfie with ID */}
+          <View style={{ height: 8 }} />
+          {loan.selfie_with_id_url ? (
+            <TouchableOpacity onPress={() => openUrl(loan.selfie_with_id_url)}>
+              <Image
+                source={{ uri: loan.selfie_with_id_url }}
+                style={styles.docPreview}
+                resizeMode="cover"
+              />
+              <Text style={styles.docLabel}>Selfie with ID (tap to open)</Text>
+            </TouchableOpacity>
+          ) : (
+            <Text style={styles.small}>No selfie uploaded</Text>
+          )}
+
+          {/* Proof of funds */}
+          <View style={{ height: 8 }} />
+          {loan.proof_of_funds_url || loan.proof_of_income_url ? (
+            <TouchableOpacity
+              onPress={() =>
+                openUrl(loan.proof_of_funds_url ?? loan.proof_of_income_url)
+              }
+            >
+              <Image
+                source={{ uri: loan.proof_of_funds_url ?? loan.proof_of_income_url }}
+                style={styles.docPreview}
+                resizeMode="cover"
+              />
+              <Text style={styles.docLabel}>Proof of Income (tap to open)</Text>
+            </TouchableOpacity>
+          ) : (
+            <Text style={styles.small}>No proof of income uploaded</Text>
+          )}
+        </View>
+
+        {/* Actions */}
+        <View style={{ marginTop: 18 }}>
+          {(status === "active" || status === "approved") && (
+            <TouchableOpacity
+              style={styles.payBtn}
+              onPress={() => navigation.navigate("RepayLoan", { loan })}
+            >
+              <Text style={styles.payText}>Make a Payment</Text>
+            </TouchableOpacity>
+          )}
+
+          <TouchableOpacity
+            style={[styles.secondaryBtn, { marginTop: 12 }]}
+            onPress={() => navigation.navigate("Payment History")}
+          >
+            <Text style={styles.secondaryText}>View Transactions</Text>
+          </TouchableOpacity>
+
+          {/* If admin needs to disburse/approve, those screens should be used from admin nav */}
+        </View>
+
+        <View style={{ height: 60 }} />
       </View>
     </ScrollView>
   );
-};
-
-export default LoanDetailsScreen;
-
-const DetailRow = ({
-  label,
-  value,
-  valueColor = "#000",
-}: {
-  label: string;
-  value: any;
-  valueColor?: string;
-}) => (
-  <View style={styles.row}>
-    <Text style={styles.label}>{label}</Text>
-    <Text style={[styles.value, { color: valueColor }]}>{value}</Text>
-  </View>
-);
+}
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#f7f9fc" },
-  centered: { flex: 1, justifyContent: "center", alignItems: "center" },
-
   header: {
+    paddingTop: 50,
+    paddingBottom: 20,
+    paddingHorizontal: 16,
     flexDirection: "row",
+    justifyContent: "space-between",
     alignItems: "center",
-    paddingHorizontal: 15,
-    paddingVertical: 20,
   },
-  backButton: { marginRight: 10 },
-  headerTitle: { fontSize: 22, fontWeight: "700", color: "#fff" },
+  headerTitle: { color: "#fff", fontWeight: "700", fontSize: 20 },
+
+  container: { padding: 16 },
+  center: { flex: 1, justifyContent: "center", alignItems: "center" },
 
   card: {
     backgroundColor: "#fff",
-    borderRadius: 16,
-    padding: 20,
-    marginHorizontal: 20,
-    marginTop: 15,
-    elevation: 4,
+    borderRadius: 12,
+    padding: 16,
+    elevation: 2,
     borderWidth: 2,
+    borderColor: "#e8f4ff",
+  },
+
+  label: { color: "#666", marginTop: 6, fontSize: 13 },
+  value: { fontSize: 22, fontWeight: "900", marginTop: 4 },
+
+  small: { fontSize: 14, color: "#444", marginTop: 4 },
+  smallValue: { fontSize: 16, fontWeight: "700", color: "#000", marginTop: 4 },
+
+  sectionTitle: { fontWeight: "800", fontSize: 16, marginBottom: 12 },
+
+  docPreview: {
+    width: "100%",
+    height: 160,
+    borderRadius: 10,
+    backgroundColor: "#f2f6fb",
+  },
+  docLabel: { marginTop: 8, color: "#0077C8", fontWeight: "700" },
+
+  payBtn: {
+    backgroundColor: "#169AF9",
+    paddingVertical: 14,
+    borderRadius: 10,
+    alignItems: "center",
+    marginTop: 8,
+  },
+  payText: { color: "#fff", fontWeight: "800" },
+
+  secondaryBtn: {
+    borderWidth: 1.5,
     borderColor: "#169AF9",
+    paddingVertical: 12,
+    borderRadius: 8,
+    alignItems: "center",
   },
+  secondaryText: { color: "#169AF9", fontWeight: "700" },
 
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: "700",
-    marginBottom: 10,
-  },
-
-  row: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    marginVertical: 5,
-  },
-  label: { fontSize: 15, color: "#555" },
-  value: { fontSize: 15, fontWeight: "700" },
+  row: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  rowBetween: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
 });
