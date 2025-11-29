@@ -4,127 +4,150 @@ import {
   View,
   Text,
   StyleSheet,
-  ActivityIndicator,
   TouchableOpacity,
+  TextInput,
+  ActivityIndicator,
   Alert,
 } from "react-native";
-import Icon from "react-native-vector-icons/Ionicons";
 import LinearGradient from "react-native-linear-gradient";
-import { useRoute, useNavigation } from "@react-navigation/native";
-import AsyncStorage from "@react-native-async-storage/async-storage";
+import Icon from "react-native-vector-icons/Ionicons";
 import axios from "axios";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { API_BASE } from "../config";
 
-export default function GCashSimScreen() {
-  const route = useRoute<any>();
-  const navigation = useNavigation<any>();
-
+export default function GCashSimScreen({ route, navigation }: any) {
   const loan = route.params?.loan;
-  const amount = Number(route.params?.amount ?? loan?.daily_payment ?? 0);
-  const [loading, setLoading] = useState(false);
+  const [amount, setAmount] = useState(
+    loan?.daily_payment ? String(loan.daily_payment) : ""
+  );
 
-  if (!loan) {
-    return (
-      <View style={styles.center}>
-        <Text>No loan selected.</Text>
-      </View>
-    );
-  }
+  const [processing, setProcessing] = useState(false);
 
   const handlePay = async () => {
+    if (!amount) return Alert.alert("Missing Amount", "Enter payment amount.");
+    if (!loan?.id) return Alert.alert("Error", "Loan missing.");
+
     try {
-      setLoading(true);
+      setProcessing(true);
+
       const token = await AsyncStorage.getItem("userToken");
 
-      if (!token) {
-        Alert.alert("Login required", "Please login to continue.");
-        setLoading(false);
-        return;
-      }
+      // Simulated 2-second "processing..."
+      await new Promise((res) => setTimeout(res, 1500));
 
       const res = await axios.post(
-        `${API_BASE}/loans/${loan.id}/pay`,
+        `${API_BASE}/repayments/pay`,
         {
-          amount,
-          method: "gcash",
-          metadata: { simulated: true },
+          loan_id: loan.id,
+          amount: Number(amount),
+          payment_method: "GCash",
         },
-        {
-          headers: { Authorization: `Bearer ${token}` },
-        }
+        { headers: { Authorization: `Bearer ${token}` } }
       );
 
-      setLoading(false);
+      const payload = res.data;
 
-      Alert.alert("Payment Successful", "GCash payment recorded.", [
-        {
-          text: "OK",
-          onPress: () => {
-            navigation.reset({
-              index: 0,
-              routes: [{ name: "Home" }],
-            });
-          },
+      navigation.replace("PaymentReceipt", {
+        payment: {
+          amount: Number(amount),
+          method: "GCash",
+          date: new Date().toISOString(),
+          loanId: loan.id,
+          transaction: payload.transaction || null,
+          remaining: payload.remaining_balance,
         },
-      ]);
+      });
     } catch (err: any) {
-      console.error("GCash error", err?.response?.data || err);
-      setLoading(false);
-
-      Alert.alert(
-        "Failed",
-        err?.response?.data?.message || "Unable to complete payment."
-      );
+      console.error("GCash payment error:", err?.response?.data || err);
+      Alert.alert("Payment Failed", "Unable to process payment.");
+    } finally {
+      setProcessing(false);
     }
   };
 
   return (
-    <View style={{ flex: 1, backgroundColor: "#f6f7fb" }}>
-      <LinearGradient colors={["#169AF9", "#37AAF2"]} style={styles.header}>
+    <LinearGradient colors={["#0A9EFA", "#0077c8"]} style={{ flex: 1 }}>
+      <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()}>
           <Icon name="arrow-back" size={26} color="#fff" />
         </TouchableOpacity>
-
         <Text style={styles.headerTitle}>GCash Payment</Text>
-        <View style={{ width: 44 }} />
-      </LinearGradient>
-
-      <View style={styles.container}>
-        <Text style={styles.label}>Amount to Pay</Text>
-        <Text style={styles.value}>₱ {amount.toLocaleString()}</Text>
-
-        <TouchableOpacity
-          style={styles.payBtn}
-          onPress={handlePay}
-          disabled={loading}
-        >
-          {loading ? (
-            <ActivityIndicator color="#fff" />
-          ) : (
-            <Text style={styles.payText}>Confirm GCash Payment</Text>
-          )}
-        </TouchableOpacity>
+        <View style={{ width: 32 }} />
       </View>
-    </View>
+
+      <View style={styles.card}>
+        <Text style={styles.title}>Enter Amount</Text>
+
+        <TextInput
+          value={amount}
+          onChangeText={setAmount}
+          keyboardType="numeric"
+          style={styles.input}
+          placeholder="0.00"
+        />
+
+        {!processing ? (
+          <TouchableOpacity style={styles.payBtn} onPress={handlePay}>
+            <Text style={styles.payText}>Pay with GCash</Text>
+          </TouchableOpacity>
+        ) : (
+          <View style={styles.processingBox}>
+            <ActivityIndicator size="large" color="#0077c8" />
+            <Text style={styles.processingText}>Processing GCash Payment…</Text>
+          </View>
+        )}
+      </View>
+    </LinearGradient>
   );
 }
 
 const styles = StyleSheet.create({
-  header: { paddingTop: 50, paddingBottom: 20, paddingHorizontal: 16, flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
-  headerTitle: { color: "#fff", fontWeight: "700", fontSize: 20 },
+  header: {
+    paddingTop: 50,
+    paddingBottom: 16,
+    paddingHorizontal: 16,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  headerTitle: {
+    color: "#fff",
+    fontWeight: "700",
+    fontSize: 18,
+  },
 
-  container: { padding: 20, marginTop: 20 },
-  label: { color: "#666", fontSize: 14 },
-  value: { fontSize: 28, fontWeight: "900", marginVertical: 10 },
-
+  card: {
+    marginTop: 40,
+    backgroundColor: "#fff",
+    marginHorizontal: 20,
+    borderRadius: 18,
+    padding: 20,
+    elevation: 5,
+  },
+  title: {
+    fontSize: 16,
+    fontWeight: "700",
+    marginBottom: 12,
+  },
+  input: {
+    borderWidth: 1.5,
+    borderColor: "#0A9EFA",
+    borderRadius: 10,
+    padding: 14,
+    fontSize: 18,
+    marginBottom: 20,
+  },
   payBtn: {
-    backgroundColor: "#169AF9",
+    backgroundColor: "#0077c8",
     paddingVertical: 14,
     borderRadius: 12,
     alignItems: "center",
-    marginTop: 20,
   },
-  payText: { color: "#fff", fontWeight: "800" },
-
-  center: { flex: 1, justifyContent: "center", alignItems: "center" },
+  payText: {
+    color: "#fff",
+    fontWeight: "800",
+    fontSize: 16,
+  },
+  processingBox: { alignItems: "center", paddingVertical: 20 },
+  processingText: { marginTop: 10, color: "#0077c8", fontWeight: "700" },
 });

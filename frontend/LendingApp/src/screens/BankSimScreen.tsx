@@ -1,4 +1,4 @@
-// src/screens/MayaSimScreen.tsx
+// src/screens/BankSimScreen.tsx
 import React, { useState } from "react";
 import {
   View,
@@ -15,7 +15,7 @@ import axios from "axios";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { API_BASE } from "../config";
 
-export default function MayaSimScreen({ route, navigation }: any) {
+export default function BankSimScreen({ route, navigation }: any) {
   const loan = route.params?.loan;
   const [amount, setAmount] = useState(
     loan?.daily_payment ? String(loan.daily_payment) : ""
@@ -24,14 +24,14 @@ export default function MayaSimScreen({ route, navigation }: any) {
   const [processing, setProcessing] = useState(false);
 
   const handlePay = async () => {
-    if (!amount) return Alert.alert("Missing Amount", "Enter payment amount.");
+    if (!amount) return Alert.alert("Missing", "Enter payment amount.");
     if (!loan?.id) return Alert.alert("Error", "Loan missing.");
 
     try {
       setProcessing(true);
-
       const token = await AsyncStorage.getItem("userToken");
 
+      // Fake 1.5s bank processing
       await new Promise((res) => setTimeout(res, 1500));
 
       const res = await axios.post(
@@ -39,7 +39,7 @@ export default function MayaSimScreen({ route, navigation }: any) {
         {
           loan_id: loan.id,
           amount: Number(amount),
-          payment_method: "Maya",
+          payment_method: "Bank",
         },
         { headers: { Authorization: `Bearer ${token}` } }
       );
@@ -49,7 +49,7 @@ export default function MayaSimScreen({ route, navigation }: any) {
       navigation.replace("PaymentReceipt", {
         payment: {
           amount: Number(amount),
-          method: "Maya",
+          method: "Bank Transfer",
           date: new Date().toISOString(),
           loanId: loan.id,
           transaction: payload.transaction || null,
@@ -57,7 +57,7 @@ export default function MayaSimScreen({ route, navigation }: any) {
         },
       });
     } catch (err: any) {
-      console.error("Maya pay error:", err?.response?.data || err);
+      console.error("Bank payment error:", err?.response?.data || err);
       Alert.alert("Payment Failed", "Unable to process payment.");
     } finally {
       setProcessing(false);
@@ -65,12 +65,12 @@ export default function MayaSimScreen({ route, navigation }: any) {
   };
 
   return (
-    <LinearGradient colors={["#17c964", "#0f8f4f"]} style={{ flex: 1 }}>
+    <LinearGradient colors={["#0066cc", "#004c99"]} style={{ flex: 1 }}>
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()}>
           <Icon name="arrow-back" size={26} color="#fff" />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Maya Payment</Text>
+        <Text style={styles.headerTitle}>Bank Transfer</Text>
         <View style={{ width: 32 }} />
       </View>
 
@@ -87,12 +87,12 @@ export default function MayaSimScreen({ route, navigation }: any) {
 
         {!processing ? (
           <TouchableOpacity style={styles.payBtn} onPress={handlePay}>
-            <Text style={styles.payText}>Pay with Maya</Text>
+            <Text style={styles.payText}>Pay via Bank</Text>
           </TouchableOpacity>
         ) : (
           <View style={styles.processingBox}>
-            <ActivityIndicator size="large" color="#0f8f4f" />
-            <Text style={styles.processingText}>Processing Maya Payment…</Text>
+            <ActivityIndicator size="large" color="#004c99" />
+            <Text style={styles.processingText}>Processing Bank Transfer…</Text>
           </View>
         )}
       </View>
@@ -109,11 +109,7 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     alignItems: "center",
   },
-  headerTitle: {
-    color: "#fff",
-    fontWeight: "700",
-    fontSize: 18,
-  },
+  headerTitle: { color: "#fff", fontWeight: "700", fontSize: 18 },
 
   card: {
     marginTop: 40,
@@ -123,30 +119,23 @@ const styles = StyleSheet.create({
     padding: 20,
     elevation: 5,
   },
-  title: {
-    fontSize: 16,
-    fontWeight: "700",
-    marginBottom: 12,
-  },
+  title: { fontSize: 16, fontWeight: "700", marginBottom: 12 },
   input: {
     borderWidth: 1.5,
-    borderColor: "#17c964",
+    borderColor: "#0066cc",
     borderRadius: 10,
     padding: 14,
     fontSize: 18,
     marginBottom: 20,
   },
   payBtn: {
-    backgroundColor: "#0f8f4f",
+    backgroundColor: "#004c99",
     paddingVertical: 14,
     borderRadius: 12,
     alignItems: "center",
   },
-  payText: {
-    color: "#fff",
-    fontWeight: "800",
-    fontSize: 16,
-  },
+  payText: { color: "#fff", fontWeight: "800", fontSize: 16 },
+
   processingBox: { alignItems: "center", paddingVertical: 20 },
-  processingText: { marginTop: 10, color: "#0f8f4f", fontWeight: "700" },
+  processingText: { marginTop: 10, color: "#004c99", fontWeight: "700" },
 });

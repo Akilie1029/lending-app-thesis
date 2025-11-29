@@ -17,7 +17,7 @@ import LoanDetailsScreen from "./src/screens/LoanDetailsScreen";
 import LoanPayMethodScreen from "./src/screens/LoanPayMethodScreen";
 import GCashSimScreen from "./src/screens/GCashSimScreen";
 import MayaSimScreen from "./src/screens/MayaSimScreen";
-import BankPayScreen from "./src/screens/BankPayScreen";
+import BankPayScreen from "./src/screens/BankSimScreen";
 import CardPayScreen from "./src/screens/CardPayScreen";
 
 // Drawers

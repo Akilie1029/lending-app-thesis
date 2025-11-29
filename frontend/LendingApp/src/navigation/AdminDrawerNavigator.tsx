@@ -6,14 +6,24 @@ import Icon from "react-native-vector-icons/Ionicons";
 import AdminDashboardScreen from "../screens/AdminDashboardScreen";
 import AdminLoanApprovalScreen from "../screens/AdminLoanApprovalScreen";
 import AdminDisbursementScreen from "../screens/AdminDisbursementScreen";
-import AdminLoansListScreen from "../screens/AdminLoansListScreen";
+import AdminApprovedLoansScreen from "../screens/AdminApprovedLoansScreen";
+import AdminAllLoansScreen from "../screens/AdminAllLoansScreen"; // ✔ NEW correct screen
 
-import { View, Text, TouchableOpacity, StyleSheet, Alert } from "react-native";
+import {
+  View,
+  Text,
+  TouchableOpacity,
+  StyleSheet,
+  Alert,
+} from "react-native";
+
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 const Drawer = createDrawerNavigator();
 
-// Custom Drawer Header
+// ===============================
+// HEADER
+// ===============================
 function DrawerHeader() {
   return (
     <View style={styles.header}>
@@ -23,6 +33,9 @@ function DrawerHeader() {
   );
 }
 
+// ===============================
+// LOGOUT BUTTON
+// ===============================
 function LogoutButton({ navigation }: any) {
   const handleLogout = () => {
     Alert.alert("Logout", "Are you sure?", [
@@ -49,6 +62,9 @@ function LogoutButton({ navigation }: any) {
   );
 }
 
+// ===============================
+// DRAWER NAVIGATOR
+// ===============================
 export default function AdminDrawerNavigator({ navigation }: any) {
   return (
     <Drawer.Navigator
@@ -95,10 +111,22 @@ export default function AdminDrawerNavigator({ navigation }: any) {
         }}
       />
 
-      {/* OPTIONAL — LOAN LIST */}
+      {/* APPROVED LOANS */}
       <Drawer.Screen
-        name="AdminLoansListScreen"
-        component={AdminLoansListScreen}
+        name="AdminApprovedLoansScreen"
+        component={AdminApprovedLoansScreen}
+        options={{
+          drawerLabel: "Approved Loans",
+          drawerIcon: ({ color }) => (
+            <Icon name="checkmark-done-outline" size={20} color={color} />
+          ),
+        }}
+      />
+
+      {/* ALL LOANS LIST (REPLACED OLD AdminLoansListScreen) */}
+      <Drawer.Screen
+        name="AdminAllLoansScreen"
+        component={AdminAllLoansScreen}
         options={{
           drawerLabel: "All Loans",
           drawerIcon: ({ color }) => (
@@ -107,7 +135,7 @@ export default function AdminDrawerNavigator({ navigation }: any) {
         }}
       />
 
-      {/* LOGOUT BUTTON */}
+      {/* LOGOUT */}
       <Drawer.Screen
         name="AdminLogout"
         children={() => <LogoutButton navigation={navigation} />}
@@ -122,6 +150,9 @@ export default function AdminDrawerNavigator({ navigation }: any) {
   );
 }
 
+// ===============================
+// STYLES
+// ===============================
 const styles = StyleSheet.create({
   header: {
     padding: 20,

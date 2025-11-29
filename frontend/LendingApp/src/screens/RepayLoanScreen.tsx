@@ -1,281 +1,234 @@
 // src/screens/RepayLoanScreen.tsx
-import React, { useState } from "react";
+import React, { useState, useMemo } from "react";
 import {
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
-  Alert,
   ActivityIndicator,
-  Modal,
-  TextInput,
-  KeyboardAvoidingView,
-  Platform,
+  Alert,
+  ScrollView,
 } from "react-native";
-import LinearGradient from "react-native-linear-gradient";
-import Icon from "react-native-vector-icons/Ionicons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import axios from "axios";
-import { useRoute, useNavigation } from "@react-navigation/native";
 import { API_BASE } from "../config";
+import Icon from "react-native-vector-icons/Ionicons";
 
-export default function RepayLoanScreen() {
-  const route = useRoute<any>();
-  const navigation = useNavigation<any>();
+type Props = {
+  navigation: any;
+  route: { params: { loan: any } };
+};
+
+const PAYMENT_METHODS: Array<{ id: string; label: string }> = [
+  { id: "gcash", label: "GCash" },
+  { id: "maya", label: "Maya" },
+  { id: "bank", label: "Bank Transfer" },
+  { id: "card", label: "Card (Simulated)" },
+];
+
+export default function RepayLoanScreen({ navigation, route }: Props) {
   const loan = route.params?.loan;
+  const principal = Number(loan?.principal ?? loan?.amount_requested ?? 0);
+  const total = Number(loan?.total_payable ?? 0);
+  const remaining = Number(loan?.remaining_balance ?? total);
+  const daily = Number(loan?.daily_payment ?? 0);
 
+  // Default payment amount — by design we use daily payment, but allow paying more by selecting "Full"
+  const [amountToPay, setAmountToPay] = useState<number>(Math.min(daily || total, remaining));
+  const [method, setMethod] = useState<string>("gcash");
   const [loading, setLoading] = useState(false);
-  const [showBankForm, setShowBankForm] = useState(false);
-  const [selectedBank, setSelectedBank] = useState<string | null>(null);
-  const [bankAccount, setBankAccount] = useState("");
-  const [showProcessing, setShowProcessing] = useState(false);
-  const [customAmount, setCustomAmount] = useState<string>("");
 
-  if (!loan) {
-    return (
-      <View style={styles.centered}>
-        <Text>No loan selected.</Text>
-      </View>
-    );
-  }
+  const friendlyRemaining = useMemo(() => remaining.toFixed(2), [remaining]);
 
-  const daily = Number(loan.daily_payment ?? loan.total_payable ?? 0);
-  const remaining = Number(loan.remaining_balance ?? loan.total_payable ?? 0);
+  const payNow = async () => {
+    if (!loan?.id) {
+      Alert.alert("Error", "Loan data missing.");
+      return;
+    }
 
-  const amountToPay = () => {
-    const parsed = Number(customAmount);
-    if (!isNaN(parsed) && parsed > 0) return parsed;
-    return daily;
-  };
+    if (!amountToPay || amountToPay <= 0) {
+      Alert.alert("Invalid amount", "Enter a valid payment amount.");
+      return;
+    }
 
-  const payViaApi = async (method: string, payload: any = {}) => {
+    setLoading(true);
+
     try {
-      setLoading(true);
+      // Simulate short processing for UX (makes it feel realistic)
+      await new Promise((r) => setTimeout(r, 900));
+
       const token = await AsyncStorage.getItem("userToken");
-      if (!token) throw new Error("User not authenticated");
+      if (!token) {
+        Alert.alert("Not logged in", "Please login and try again.");
+        setLoading(false);
+        return;
+      }
 
       const res = await axios.post(
-        `${API_BASE}/loans/${loan.id}/pay`,
+        `${API_BASE}/repayments/pay`,
         {
-          amount: payload.amount ?? amountToPay(),
-          method,
-          metadata: payload.metadata ?? {},
+          loan_id: loan.id,
+          amount: amountToPay,
+          payment_method: method,
         },
         { headers: { Authorization: `Bearer ${token}` } }
       );
 
-      const updatedLoan = res.data?.loan ?? res.data;
-      setLoading(false);
-
-      Alert.alert("Payment successful", "Payment recorded.", [
-        {
-          text: "OK",
-          onPress: () => {
-            navigation.reset({
-              index: 0,
-              routes: [{ name: "Home" as any }],
-            });
-          },
-        },
-      ]);
+      // Expecting: { success: true, payment: {...}, remaining_balance, loan }
+      if (res.data && (res.data.success || res.status === 200)) {
+        const payload = res.data;
+        navigation.replace("PaymentReceipt", {
+          receipt: payload.payment,
+          remaining_balance: payload.remaining_balance,
+          loan: payload.loan ?? loan,
+        });
+      } else {
+        console.warn("Unexpected repayment response:", res.data);
+        Alert.alert("Payment", res.data?.error || "Payment processed but received unexpected response.");
+      }
     } catch (err: any) {
-      console.error("Pay error", err?.response?.data || err.message);
+      console.error("Repayment error:", err?.response?.data || err?.message || err);
+      const msg =
+        err?.response?.data?.error ||
+        err?.response?.data?.message ||
+        "Payment failed. Please try again.";
+      Alert.alert("Payment Failed", msg);
+    } finally {
       setLoading(false);
-      Alert.alert(
-        "Payment failed",
-        err?.response?.data?.message || err?.response?.data?.error || "Unable to complete payment."
-      );
     }
   };
 
+  const quickSet = (type: "daily" | "full") => {
+    if (type === "daily") setAmountToPay(Math.min(daily || total, remaining));
+    else setAmountToPay(remaining);
+  };
+
   return (
-    <KeyboardAvoidingView
-      style={{ flex: 1, backgroundColor: "#f6f7fb" }}
-      behavior={Platform.OS === "ios" ? "padding" : undefined}
-    >
-      <LinearGradient colors={["#169AF9", "#37AAF2"]} style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()}>
+    <View style={{ flex: 1, backgroundColor: "#f6f7fb" }}>
+      <View style={styles.header}>
+        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
           <Icon name="arrow-back" size={26} color="#fff" />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Repay Loan</Text>
+        <Text style={styles.headerTitle}>Make a Payment</Text>
         <View style={{ width: 44 }} />
-      </LinearGradient>
+      </View>
 
-      <View style={styles.container}>
-        <View style={styles.summaryCard}>
-          <Text style={styles.summaryLabel}>Remaining Balance</Text>
-          <Text style={styles.summaryAmount}>₱ {remaining.toLocaleString()}</Text>
+      <ScrollView contentContainerStyle={{ padding: 16 }}>
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Loan</Text>
+          <Text style={styles.bigAmount}>₱ {principal.toLocaleString()}</Text>
+
+          <View style={styles.row}>
+            <Text style={styles.label}>Term</Text>
+            <Text style={styles.value}>{loan?.days ?? "—"} days</Text>
+          </View>
+
+          <View style={styles.row}>
+            <Text style={styles.label}>Daily Payment</Text>
+            <Text style={styles.value}>₱ {Number(daily).toLocaleString()}</Text>
+          </View>
+
+          <View style={styles.row}>
+            <Text style={styles.label}>Remaining</Text>
+            <Text style={[styles.value, { color: "#D62828" }]}>₱ {Number(remaining).toLocaleString()}</Text>
+          </View>
 
           <View style={{ marginTop: 12 }}>
-            <Text style={styles.small}>Daily Payment</Text>
-            <Text style={styles.daily}>₱ {daily.toLocaleString()}</Text>
-          </View>
+            <Text style={[styles.label, { marginBottom: 8 }]}>Amount to pay</Text>
 
-          <View style={{ marginTop: 10 }}>
-            <Text style={styles.small}>Next Due</Text>
-            <Text style={styles.small}>
-              {loan.latest_due_date ? new Date(loan.latest_due_date).toLocaleDateString() : "N/A"}
-            </Text>
-          </View>
-        </View>
-
-        <Text style={styles.sectionTitle}>Choose Payment Method</Text>
-
-        <View style={styles.methodRow}>
-          <TouchableOpacity
-            style={styles.methodCard}
-            onPress={() => navigation.navigate("GCashPay" as any, { loan, amount: amountToPay() })}
-          >
-            <Icon name="phone-portrait" size={28} color="#0077C8" />
-            <Text style={styles.methodTitle}>GCash</Text>
-            <Text style={styles.methodSub}>Pay with GCash</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.methodCard}
-            onPress={() => navigation.navigate("MayaPay" as any, { loan, amount: amountToPay() })}
-          >
-            <Icon name="wallet" size={28} color="#8A2BE2" />
-            <Text style={styles.methodTitle}>Maya</Text>
-            <Text style={styles.methodSub}>Pay with Maya</Text>
-          </TouchableOpacity>
-        </View>
-
-        <View style={styles.methodRow}>
-          <TouchableOpacity style={styles.methodCard} onPress={() => setShowBankForm(true)}>
-            <Icon name="md-bank" size={28} color="#0077C8" />
-            <Text style={styles.methodTitle}>Bank Transfer</Text>
-            <Text style={styles.methodSub}>Select bank & submit</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.methodCard}
-            onPress={() => navigation.navigate("CardPay" as any, { loan, amount: amountToPay() })}
-          >
-            <Icon name="card" size={28} color="#0077C8" />
-            <Text style={styles.methodTitle}>Debit / Credit</Text>
-            <Text style={styles.methodSub}>Visa / Mastercard</Text>
-          </TouchableOpacity>
-        </View>
-
-        <View style={{ marginTop: 16 }}>
-          <Text style={{ color: "#666", marginBottom: 6 }}>Pay a different amount</Text>
-          <TextInput
-            placeholder={`Leave empty to pay daily ₱${daily.toLocaleString()}`}
-            keyboardType="numeric"
-            value={customAmount}
-            onChangeText={setCustomAmount}
-            style={styles.customInput}
-          />
-        </View>
-
-        <Modal visible={showBankForm} animationType="slide">
-          <View style={styles.modalWrap}>
-            <Text style={styles.modalTitle}>Bank Transfer</Text>
-
-            {["BDO", "BPI", "Landbank", "Metrobank", "PNB"].map((b) => (
-              <TouchableOpacity
-                key={b}
-                style={[
-                  styles.bankOption,
-                  selectedBank === b ? { borderColor: "#169AF9", borderWidth: 2 } : {},
-                ]}
-                onPress={() => setSelectedBank(b)}
-              >
-                <Text style={{ fontWeight: "700" }}>{b}</Text>
+            <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 8 }}>
+              <TouchableOpacity style={styles.quickBtn} onPress={() => quickSet("daily")}>
+                <Text style={styles.quickBtnText}>Daily</Text>
               </TouchableOpacity>
-            ))}
-
-            <View style={{ marginTop: 8 }}>
-              <Text style={{ marginBottom: 4, color: "#666" }}>Account / Reference</Text>
-              <TextInput
-                placeholder="Enter account or transaction reference"
-                value={bankAccount}
-                onChangeText={setBankAccount}
-                style={[styles.input, { marginBottom: 8 }]}
-              />
+              <TouchableOpacity style={styles.quickBtn} onPress={() => quickSet("full")}>
+                <Text style={styles.quickBtnText}>Full</Text>
+              </TouchableOpacity>
             </View>
 
-            <View style={{ height: 12 }} />
-
-            <TouchableOpacity
-              style={[styles.primaryButton, { alignSelf: "stretch" }]}
-              onPress={() => {
-                if (!selectedBank) {
-                  Alert.alert("Select bank", "Please choose a bank.");
-                  return;
-                }
-                setShowProcessing(true);
-                setTimeout(async () => {
-                  setShowProcessing(false);
-                  await payViaApi("bank", {
-                    amount: amountToPay(),
-                    metadata: { bank: selectedBank, account: bankAccount },
-                  });
-                }, 800);
-              }}
-            >
-              <Text style={styles.primaryButtonText}>Submit Bank Payment</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity style={[styles.secondaryButton, { marginTop: 10 }]} onPress={() => setShowBankForm(false)}>
-              <Text style={styles.secondaryButtonText}>Cancel</Text>
-            </TouchableOpacity>
+            <View style={styles.amountBox}>
+              <Text style={{ fontWeight: "800", fontSize: 20 }}>₱ {Number(amountToPay).toLocaleString()}</Text>
+              <Text style={{ color: "#666", fontSize: 12 }}>Will be charged to selected method</Text>
+            </View>
           </View>
-
-          <Modal visible={showProcessing} transparent animationType="fade">
-            <View style={styles.processing}>
-              <ActivityIndicator size="large" color="#fff" />
-              <Text style={{ color: "#fff", marginTop: 8 }}>Processing...</Text>
-            </View>
-          </Modal>
-        </Modal>
-
-        <View style={{ marginTop: 20 }}>
-          <TouchableOpacity
-            style={[styles.primaryButton, { alignSelf: "stretch" }]}
-            onPress={() =>
-              Alert.alert("Choose method", "Please choose GCash / Maya / Bank or Card to proceed.")
-            }
-          >
-            <Text style={styles.primaryButtonText}>Pay Now</Text>
-          </TouchableOpacity>
         </View>
 
-        {loading && (
-          <View style={styles.fullscreenLoader}>
-            <ActivityIndicator size="large" />
-          </View>
-        )}
-      </View>
-    </KeyboardAvoidingView>
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Payment Method</Text>
+
+          {PAYMENT_METHODS.map((m) => (
+            <TouchableOpacity
+              key={m.id}
+              style={[styles.methodRow, method === m.id ? styles.methodActive : undefined]}
+              onPress={() => setMethod(m.id)}
+            >
+              <View style={{ flexDirection: "row", alignItems: "center" }}>
+                <Icon
+                  name={
+                    m.id === "gcash"
+                      ? "logo-bitcoin"
+                      : m.id === "maya"
+                      ? "card"
+                      : m.id === "bank"
+                      ? "bank"
+                      : "card"
+                  }
+                  size={20}
+                  color={method === m.id ? "#fff" : "#169AF9"}
+                />
+                <Text style={[styles.methodLabel, method === m.id ? { color: "#fff" } : undefined]}>
+                  {m.label}
+                </Text>
+              </View>
+
+              {method === m.id && <Text style={{ color: "#fff", fontWeight: "800" }}>Selected</Text>}
+            </TouchableOpacity>
+          ))}
+
+          <Text style={{ color: "#666", marginTop: 8 }}>
+            Note: This app simulates payment. No real money is transferred.
+          </Text>
+        </View>
+
+        <TouchableOpacity
+          style={[styles.payBtn, loading ? { opacity: 0.7 } : null]}
+          onPress={payNow}
+          disabled={loading}
+        >
+          {loading ? (
+            <ActivityIndicator color="#fff" />
+          ) : (
+            <Text style={styles.payBtnText}>Pay ₱ {Number(amountToPay).toLocaleString()}</Text>
+          )}
+        </TouchableOpacity>
+
+        <View style={{ height: 80 }} />
+      </ScrollView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  header: { paddingTop: 50, paddingBottom: 18, paddingHorizontal: 16, flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
-  headerTitle: { fontSize: 20, fontWeight: "700", color: "#fff" },
-  container: { padding: 16, flex: 1 },
-  summaryCard: { backgroundColor: "#fff", padding: 16, borderRadius: 12, elevation: 3, borderWidth: 2, borderColor: "#e8f4ff" },
-  summaryLabel: { color: "#666" },
-  summaryAmount: { fontSize: 26, fontWeight: "900", marginTop: 6 },
-  sectionTitle: { fontSize: 16, fontWeight: "700", marginTop: 18, marginBottom: 8 },
-  methodRow: { flexDirection: "row", justifyContent: "space-between", marginBottom: 12 },
-  methodCard: { backgroundColor: "#fff", padding: 12, borderRadius: 12, width: "48%", alignItems: "center", elevation: 2, borderWidth: 1, borderColor: "#eaf6ff" },
-  methodTitle: { fontWeight: "700", marginTop: 8 },
-  methodSub: { color: "#666", fontSize: 12 },
-  small: { color: "#666", fontSize: 12 },
-  daily: { fontSize: 20, fontWeight: "800", marginTop: 4 },
-  modalWrap: { padding: 16, flex: 1, backgroundColor: "#f6f7fb" },
-  modalTitle: { fontSize: 18, fontWeight: "800", marginBottom: 12 },
-  bankOption: { padding: 12, borderRadius: 8, backgroundColor: "#fff", marginBottom: 8, borderWidth: 1, borderColor: "#eee" },
-  input: { padding: 12, borderRadius: 8, backgroundColor: "#fff", borderWidth: 1, borderColor: "#eee" },
-  primaryButton: { backgroundColor: "#169AF9", padding: 14, borderRadius: 10, alignItems: "center" },
-  primaryButtonText: { color: "#fff", fontWeight: "800" },
-  secondaryButton: { borderWidth: 1.5, borderColor: "#169AF9", padding: 12, borderRadius: 10, alignItems: "center" },
-  secondaryButtonText: { color: "#169AF9", fontWeight: "700" },
-  centered: { flex: 1, justifyContent: "center", alignItems: "center" },
-  processing: { flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: "rgba(0,0,0,0.6)" },
-  fullscreenLoader: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, justifyContent: "center", alignItems: "center", backgroundColor: "rgba(255,255,255,0.5)" },
-  customInput: { backgroundColor: "#fff", borderRadius: 8, padding: 12, borderWidth: 1, borderColor: "#eee" },
+  header: { paddingTop: 50, paddingBottom: 18, paddingHorizontal: 16, backgroundColor: "#169AF9", flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  backBtn: { width: 44 },
+  headerTitle: { color: "#fff", fontSize: 20, fontWeight: "700" },
+
+  card: { backgroundColor: "#fff", borderRadius: 12, padding: 14, marginBottom: 12, elevation: 2 },
+  cardTitle: { fontWeight: "800", marginBottom: 8 },
+  bigAmount: { fontSize: 22, fontWeight: "900", color: "#0077C8" },
+
+  row: { flexDirection: "row", justifyContent: "space-between", marginTop: 8 },
+  label: { color: "#666" },
+  value: { fontWeight: "800" },
+
+  quickBtn: { backgroundColor: "#f3f8fb", paddingVertical: 8, paddingHorizontal: 12, borderRadius: 8 },
+  quickBtnText: { fontWeight: "700", color: "#0077C8" },
+
+  amountBox: { backgroundColor: "#f3faff", padding: 12, borderRadius: 8, marginTop: 6 },
+
+  methodRow: { padding: 12, borderRadius: 8, borderWidth: 1, borderColor: "#e6f2fb", marginVertical: 6, flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  methodActive: { backgroundColor: "#169AF9", borderColor: "#169AF9" },
+  methodLabel: { marginLeft: 10, fontWeight: "700" },
+
+  payBtn: { backgroundColor: "#169AF9", paddingVertical: 14, borderRadius: 10, alignItems: "center", marginTop: 12 },
+  payBtnText: { color: "#fff", fontWeight: "900", fontSize: 16 },
 });

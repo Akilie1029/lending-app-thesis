@@ -10,54 +10,54 @@ import {
   TouchableOpacity,
 } from "react-native";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
-import { LineChart, BarChart } from "react-native-chart-kit";
 
 import AdminHeader from "../components/AdminHeader";
 import RadialRing from "../components/RadialRing";
-import adminDashboardService from "../services/adminDashboardService";
+import api from "../services/api";
+import { LineChart, BarChart } from "react-native-chart-kit";
 
 const screenWidth = Dimensions.get("window").width;
 const CHART_WIDTH = screenWidth - 32;
 
 export default function AdminDashboardScreen() {
   const navigation = useNavigation();
-  const [stats, setStats] = useState<any>(null);
+
   const [loading, setLoading] = useState(true);
+  const [stats, setStats] = useState<any>(null);
 
   useFocusEffect(
     useCallback(() => {
-      loadDashboard();
+      load();
     }, [])
   );
 
-  async function loadDashboard() {
+  const load = async () => {
     try {
       setLoading(true);
-      const data = await adminDashboardService.load();
-      setStats(data);
+      const res = await api.get("/admin/dashboard");
+      setStats(res.data || {});
     } catch (err) {
-      console.log("Dashboard error:", err);
+      console.log("Dashboard load error:", err?.response?.data || err);
     } finally {
       setLoading(false);
     }
-  }
+  };
 
   if (loading || !stats) {
     return (
       <View style={styles.center}>
-        <ActivityIndicator size="large" color="#0A84FF" />
+        <ActivityIndicator size="large" color="#169AF9" />
         <Text style={{ marginTop: 10 }}>Loading dashboard...</Text>
       </View>
     );
   }
 
-  const paid = stats.loanStatusDistribution.paidAmount ?? 0;
-  const unpaid = stats.loanStatusDistribution.unpaidAmount ?? 0;
-  const overdue = stats.loanStatusDistribution.overdueAmount ?? 0;
+  const paid = stats.loanStatusDistribution?.paidAmount ?? 0;
+  const unpaid = stats.loanStatusDistribution?.unpaidAmount ?? 0;
+  const overdue = stats.loanStatusDistribution?.overdueAmount ?? 0;
 
   const total = paid + unpaid + overdue;
-  const pct = (value: number) =>
-    total === 0 ? 0 : Math.round((value / total) * 100);
+  const pct = (v: number) => (total === 0 ? 0 : Math.round((v / total) * 100));
 
   return (
     <ScrollView style={styles.container}>
@@ -77,7 +77,7 @@ export default function AdminDashboardScreen() {
           <Text style={styles.statFoot}>Currently disbursed</Text>
         </View>
 
-        <View style={[styles.statCard, styles.rejectedCard]}>
+        <View style={[styles.statCard, styles.redCard]}>
           <Text style={[styles.statLabel, { color: "#fff" }]}>Rejected</Text>
           <Text style={[styles.statValue, { color: "#fff" }]}>
             {stats.rejectedCount}
@@ -87,14 +87,16 @@ export default function AdminDashboardScreen() {
       </View>
 
       {/* PENDING ACTIONS */}
-      <View style={styles.pendingContainer}>
+      <View style={styles.pendingBox}>
         <TouchableOpacity
           style={styles.pendingYellow}
-          onPress={() => navigation.navigate("AdminLoanApprovalScreen" as never)}
+          onPress={() =>
+            navigation.navigate("AdminLoanApprovalScreen" as never)
+          }
         >
-          <Text style={styles.pendingTextDark}>Pending Loan Approval</Text>
-          <View style={styles.pendingCountRed}>
-            <Text style={styles.pendingNumberLight}>
+          <Text style={styles.pendingDark}>Pending Loan Approval</Text>
+          <View style={styles.pendingCountYellow}>
+            <Text style={styles.pendingNumDark}>
               {stats.pendingLoanApproval}
             </Text>
           </View>
@@ -102,11 +104,13 @@ export default function AdminDashboardScreen() {
 
         <TouchableOpacity
           style={styles.pendingRed}
-          onPress={() => navigation.navigate("AdminDisbursementScreen" as never)}
+          onPress={() =>
+            navigation.navigate("AdminDisbursementScreen" as never)
+          }
         >
-          <Text style={styles.pendingTextLight}>Pending Disbursement</Text>
+          <Text style={styles.pendingLight}>Pending Disbursement</Text>
           <View style={styles.pendingCountLight}>
-            <Text style={styles.pendingNumberRed}>
+            <Text style={styles.pendingNumRed}>
               {stats.pendingDisbursement}
             </Text>
           </View>
@@ -115,7 +119,7 @@ export default function AdminDashboardScreen() {
 
       {/* STATUS RINGS */}
       <View style={styles.panel}>
-        <Text style={styles.panelTitle}>Loan Status</Text>
+        <Text style={styles.panelTitle}>Loan Status Breakdown</Text>
 
         <View style={styles.ringRow}>
           <RadialRing
@@ -150,19 +154,14 @@ export default function AdminDashboardScreen() {
               { data: stats.paymentOverview4.expected, color: () => "#007AFF" },
               { data: stats.paymentOverview4.actual, color: () => "#34C759" },
             ],
-            legend: ["Expected", "Actual"],
           }}
           width={CHART_WIDTH}
           height={220}
-          yAxisSuffix="₱"
-          withInnerLines={false}
-          withOuterLines={false}
           chartConfig={{
-            backgroundColor: "#fff",
             backgroundGradientFrom: "#fff",
             backgroundGradientTo: "#fff",
-            color: () => "#444",
-            labelColor: () => "#555",
+            color: () => "#666",
+            labelColor: () => "#777",
           }}
           bezier
           style={{ borderRadius: 12 }}
@@ -171,7 +170,7 @@ export default function AdminDashboardScreen() {
 
       {/* WEEKLY COLLECTIONS */}
       <View style={styles.panel}>
-        <Text style={styles.panelTitle}>Collections — Last 7 Days</Text>
+        <Text style={styles.panelTitle}>Collections (Last 7 Days)</Text>
 
         <BarChart
           data={{
@@ -180,21 +179,20 @@ export default function AdminDashboardScreen() {
           }}
           width={CHART_WIDTH}
           height={220}
-          withInnerLines={false}
-          withOuterLines={false}
+          fromZero
           chartConfig={{
             backgroundGradientFrom: "#fff",
             backgroundGradientTo: "#fff",
             color: () => "#007AFF",
-            labelColor: () => "#666",
+            labelColor: () => "#777",
           }}
           style={{ borderRadius: 12 }}
         />
       </View>
 
-      {/* PAYMENT BEHAVIOR */}
+      {/* BEHAVIOR ANALYTICS */}
       <View style={styles.panel}>
-        <Text style={styles.panelTitle}>Payment Behavior — On-Time vs Late</Text>
+        <Text style={styles.panelTitle}>Payment Behavior</Text>
 
         <BarChart
           data={{
@@ -203,26 +201,22 @@ export default function AdminDashboardScreen() {
               { data: stats.paymentBehavior.onTime, color: () => "#0A84FF" },
               { data: stats.paymentBehavior.late, color: () => "#FF3B30" },
             ],
-            legend: ["On Time", "Late"],
           }}
           width={CHART_WIDTH}
-          height={230}
+          height={220}
           fromZero
-          withInnerLines={false}
-          withOuterLines={false}
           chartConfig={{
             backgroundGradientFrom: "#fff",
             backgroundGradientTo: "#fff",
             color: () => "#444",
             labelColor: () => "#666",
           }}
-          style={{ borderRadius: 12 }}
         />
       </View>
 
       {/* CASHFLOW */}
       <View style={styles.panel}>
-        <Text style={styles.panelTitle}>Cashflow — Last 12 Weeks</Text>
+        <Text style={styles.panelTitle}>Cashflow (12 Weeks)</Text>
 
         <LineChart
           data={{
@@ -233,15 +227,10 @@ export default function AdminDashboardScreen() {
               { data: stats.cashflow.repaid, color: () => "#0A84FF" },
               { data: stats.cashflow.disbursed, color: () => "#FF3B30" },
             ],
-            legend: ["Repaid", "Disbursed"],
           }}
           width={CHART_WIDTH}
           height={220}
-          withInnerLines={false}
-          withOuterLines={false}
-          yAxisSuffix="₱"
           chartConfig={{
-            backgroundColor: "#fff",
             backgroundGradientFrom: "#fff",
             backgroundGradientTo: "#fff",
             color: () => "#333",
@@ -257,25 +246,28 @@ export default function AdminDashboardScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, padding: 12, backgroundColor: "#f3f6fa" },
+  container: { flex: 1, backgroundColor: "#f3f6fa", padding: 12 },
   center: { flex: 1, justifyContent: "center", alignItems: "center" },
 
   statsRow: { flexDirection: "row", justifyContent: "space-between" },
+
   statCard: {
     flex: 1,
+    marginHorizontal: 4,
     backgroundColor: "#fff",
     padding: 14,
-    marginHorizontal: 4,
     borderRadius: 12,
     elevation: 3,
   },
+
   statLabel: { fontSize: 13, color: "#6b7280", fontWeight: "600" },
-  statValue: { fontSize: 22, fontWeight: "900", color: "#0071b2", marginTop: 6 },
-  statFoot: { fontSize: 11, color: "#9aa4b2", marginTop: 6 },
+  statValue: { fontSize: 22, fontWeight: "900", color: "#0071b2" },
+  statFoot: { fontSize: 11, marginTop: 6, color: "#9aa4b2" },
 
-  rejectedCard: { backgroundColor: "#ff4d4d" },
+  redCard: { backgroundColor: "#ff4d4d" },
 
-  pendingContainer: { marginTop: 18 },
+  pendingBox: { marginTop: 18 },
+
   pendingYellow: {
     backgroundColor: "#FFC107",
     padding: 12,
@@ -285,6 +277,15 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginBottom: 10,
   },
+  pendingDark: { color: "#000", fontWeight: "700" },
+  pendingCountYellow: {
+    backgroundColor: "#FF3B30",
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 8,
+  },
+  pendingNumDark: { color: "#fff", fontWeight: "800" },
+
   pendingRed: {
     backgroundColor: "#ff3b30",
     padding: 12,
@@ -293,27 +294,27 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     alignItems: "center",
   },
-  pendingTextDark: { fontSize: 15, fontWeight: "700", color: "#000" },
-  pendingTextLight: { fontSize: 15, fontWeight: "700", color: "#fff" },
-  pendingCountRed: {
-    backgroundColor: "#ff3b30",
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 8,
-  },
+  pendingLight: { color: "#fff", fontWeight: "700" },
   pendingCountLight: {
     backgroundColor: "#fff",
     paddingHorizontal: 10,
-    paddingVertical: 6,
+    paddingVertical: 4,
     borderRadius: 8,
   },
-  pendingNumberLight: { color: "#fff", fontWeight: "800" },
-  pendingNumberRed: { color: "#ff3b30", fontWeight: "800" },
+  pendingNumRed: { color: "#ff3b30", fontWeight: "800" },
 
-  panel: { backgroundColor: "#fff", padding: 16, borderRadius: 14, marginTop: 20, elevation: 3 },
+  panel: {
+    marginTop: 18,
+    backgroundColor: "#fff",
+    padding: 16,
+    borderRadius: 14,
+    elevation: 3,
+  },
+
   panelTitle: { fontSize: 18, fontWeight: "800", marginBottom: 12 },
 
-  ringRow: { flexDirection: "row", justifyContent: "space-between" },
-
-  legend: { fontSize: 14, fontWeight: "600", marginVertical: 2 },
+  ringRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+  },
 });

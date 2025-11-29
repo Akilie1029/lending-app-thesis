@@ -4,170 +4,183 @@ import {
   View,
   Text,
   StyleSheet,
-  TextInput,
   TouchableOpacity,
-  Alert,
+  TextInput,
   ActivityIndicator,
-  KeyboardAvoidingView,
-  Platform,
+  Alert,
 } from "react-native";
 import LinearGradient from "react-native-linear-gradient";
 import Icon from "react-native-vector-icons/Ionicons";
-import { useRoute, useNavigation } from "@react-navigation/native";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import axios from "axios";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { API_BASE } from "../config";
 
-export default function CardPayScreen() {
-  const route = useRoute<any>();
-  const navigation = useNavigation<any>();
-
+export default function CardPayScreen({ route, navigation }: any) {
   const loan = route.params?.loan;
-  const amount = Number(route.params?.amount ?? loan?.daily_payment ?? 0);
 
   const [cardNumber, setCardNumber] = useState("");
-  const [expDate, setExpDate] = useState("");
-  const [cvv, setCvv] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [expiry, setExpiry] = useState("");
+  const [cvc, setCvc] = useState("");
+  const [amount, setAmount] = useState(
+    loan?.daily_payment ? String(loan.daily_payment) : ""
+  );
 
-  if (!loan) {
-    return (
-      <View style={styles.center}>
-        <Text>No loan selected.</Text>
-      </View>
-    );
-  }
+  const [processing, setProcessing] = useState(false);
 
   const handlePay = async () => {
-    if (cardNumber.length < 12 || expDate.length < 4 || cvv.length < 3) {
-      Alert.alert("Invalid Input", "Please enter valid card details.");
-      return;
-    }
+    if (!amount) return Alert.alert("Missing", "Enter payment amount.");
+    if (!loan?.id) return Alert.alert("Error", "Loan missing.");
+    if (!cardNumber || !expiry || !cvc)
+      return Alert.alert("Missing", "Enter all card details.");
 
     try {
-      setLoading(true);
+      setProcessing(true);
       const token = await AsyncStorage.getItem("userToken");
 
-      await axios.post(
-        `${API_BASE}/loans/${loan.id}/pay`,
+      // Fake 1.5s card processing
+      await new Promise((res) => setTimeout(res, 1500));
+
+      const res = await axios.post(
+        `${API_BASE}/repayments/pay`,
         {
-          amount,
-          method: "card",
-          metadata: {
-            cardNumber,
-            expDate,
-            cvv,
-            simulated: true,
-          },
+          loan_id: loan.id,
+          amount: Number(amount),
+          payment_method: "Card",
         },
         { headers: { Authorization: `Bearer ${token}` } }
       );
 
-      setLoading(false);
+      const payload = res.data;
 
-      Alert.alert("Payment Successful", "Card payment recorded.", [
-        {
-          text: "OK",
-          onPress: () =>
-            navigation.reset({
-              index: 0,
-              routes: [{ name: "Home" }],
-            }),
+      navigation.replace("PaymentReceipt", {
+        payment: {
+          amount: Number(amount),
+          method: "Card",
+          date: new Date().toISOString(),
+          loanId: loan.id,
+          transaction: payload.transaction,
+          remaining: payload.remaining_balance,
         },
-      ]);
+      });
     } catch (err: any) {
-      console.error("Card payment error", err?.response?.data || err);
-
-      setLoading(false);
-      Alert.alert(
-        "Failed",
-        err?.response?.data?.message || "Unable to complete payment."
-      );
+      console.error("Card payment error:", err?.response?.data || err);
+      Alert.alert("Payment Failed", "Unable to process card payment.");
+    } finally {
+      setProcessing(false);
     }
   };
 
   return (
-    <KeyboardAvoidingView
-      style={{ flex: 1, backgroundColor: "#f6f7fb" }}
-      behavior={Platform.OS === "ios" ? "padding" : undefined}
-    >
-      <LinearGradient colors={["#169AF9", "#37AAF2"]} style={styles.header}>
+    <LinearGradient colors={["#8e44ad", "#6d2e8b"]} style={{ flex: 1 }}>
+      <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()}>
           <Icon name="arrow-back" size={26} color="#fff" />
         </TouchableOpacity>
-
         <Text style={styles.headerTitle}>Card Payment</Text>
-        <View style={{ width: 44 }} />
-      </LinearGradient>
+        <View style={{ width: 32 }} />
+      </View>
 
-      <View style={styles.container}>
-        <Text style={styles.label}>Amount to Pay</Text>
-        <Text style={styles.value}>₱ {amount.toLocaleString()}</Text>
-
-        <Text style={styles.inputLabel}>Card Number</Text>
+      <View style={styles.card}>
+        <Text style={styles.label}>Card Number</Text>
         <TextInput
-          placeholder="1234 5678 9012 3456"
-          keyboardType="numeric"
           value={cardNumber}
           onChangeText={setCardNumber}
           style={styles.input}
-        />
-
-        <Text style={styles.inputLabel}>Expiry Date (MM/YY)</Text>
-        <TextInput
-          placeholder="08/28"
-          value={expDate}
-          onChangeText={setExpDate}
-          style={styles.input}
-        />
-
-        <Text style={styles.inputLabel}>CVV</Text>
-        <TextInput
-          placeholder="123"
           keyboardType="numeric"
-          secureTextEntry
-          value={cvv}
-          onChangeText={setCvv}
-          style={styles.input}
+          placeholder="0000 0000 0000 0000"
         />
 
-        <TouchableOpacity style={styles.payBtn} onPress={handlePay} disabled={loading}>
-          {loading ? (
-            <ActivityIndicator color="#fff" />
-          ) : (
-            <Text style={styles.payText}>Confirm Card Payment</Text>
-          )}
-        </TouchableOpacity>
+        <View style={styles.row}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.label}>Expiry</Text>
+            <TextInput
+              value={expiry}
+              onChangeText={setExpiry}
+              style={styles.input}
+              placeholder="MM/YY"
+            />
+          </View>
+
+          <View style={{ width: 10 }} />
+
+          <View style={{ flex: 1 }}>
+            <Text style={styles.label}>CVC</Text>
+            <TextInput
+              value={cvc}
+              onChangeText={setCvc}
+              style={styles.input}
+              placeholder="123"
+              secureTextEntry
+              keyboardType="numeric"
+            />
+          </View>
+        </View>
+
+        <Text style={[styles.label, { marginTop: 10 }]}>Amount</Text>
+        <TextInput
+          value={amount}
+          onChangeText={setAmount}
+          style={styles.input}
+          keyboardType="numeric"
+        />
+
+        {!processing ? (
+          <TouchableOpacity style={styles.payBtn} onPress={handlePay}>
+            <Text style={styles.payText}>Pay Now</Text>
+          </TouchableOpacity>
+        ) : (
+          <View style={styles.processingBox}>
+            <ActivityIndicator size="large" color="#6d2e8b" />
+            <Text style={styles.processingText}>Processing Card Payment…</Text>
+          </View>
+        )}
       </View>
-    </KeyboardAvoidingView>
+    </LinearGradient>
   );
 }
 
 const styles = StyleSheet.create({
-  header: { paddingTop: 50, paddingBottom: 20, paddingHorizontal: 16, flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
-  headerTitle: { color: "#fff", fontSize: 20, fontWeight: "700" },
+  header: {
+    paddingTop: 50,
+    paddingBottom: 16,
+    paddingHorizontal: 16,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  headerTitle: { color: "#fff", fontWeight: "700", fontSize: 18 },
 
-  container: { padding: 20, marginTop: 20 },
-  label: { color: "#666" },
-  value: { fontSize: 28, fontWeight: "900", marginBottom: 20 },
-
-  inputLabel: { marginTop: 10, marginBottom: 4, color: "#444" },
-  input: {
+  card: {
+    marginTop: 40,
     backgroundColor: "#fff",
+    marginHorizontal: 20,
+    borderRadius: 18,
+    padding: 20,
+    elevation: 5,
+  },
+  label: { fontWeight: "700", fontSize: 13, color: "#333" },
+
+  input: {
+    borderWidth: 1.5,
+    borderColor: "#8e44ad",
     borderRadius: 10,
-    borderWidth: 1,
-    borderColor: "#ddd",
     padding: 12,
+    marginTop: 6,
+    marginBottom: 12,
+    fontSize: 16,
   },
 
+  row: { flexDirection: "row" },
+
   payBtn: {
-    backgroundColor: "#169AF9",
+    backgroundColor: "#6d2e8b",
     paddingVertical: 14,
     borderRadius: 12,
     alignItems: "center",
-    marginTop: 24,
+    marginTop: 10,
   },
-  payText: { color: "#fff", fontWeight: "800" },
+  payText: { color: "#fff", fontWeight: "800", fontSize: 16 },
 
-  center: { flex: 1, justifyContent: "center", alignItems: "center" },
+  processingBox: { alignItems: "center", paddingVertical: 20 },
+  processingText: { marginTop: 10, color: "#6d2e8b", fontWeight: "700" },
 });
