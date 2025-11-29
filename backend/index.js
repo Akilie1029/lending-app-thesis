@@ -2,206 +2,253 @@
 //                          IMPORTS & CONFIG
 // =================================================================
 
-const express = require('express');
-const cors = require('cors');
-const bcrypt = require('bcryptjs');
-const jwt = require('jsonwebtoken');
-const db = require('./db'); // Postgres pool wrapper
+const express = require("express");
+const cors = require("cors");
+const bcrypt = require("bcryptjs");
+const jwt = require("jsonwebtoken");
+const db = require("./db");
 
-const authMiddleware = require('./authMiddleware');
-const adminMiddleware = require('./adminMiddleware');
+// Middlewares
+const authMiddleware = require("./authMiddleware");
+const adminMiddleware = require("./adminMiddleware");
 
-// --- Modular Routes ---
-const loanRoutes = require('./routes/loanRoutes');                // User loan actions
-const adminRoutes = require('./routes/admin');                    // Admin dashboard (stats)
-const adminLoanApprovals = require('./routes/adminLoanApprovals');// Admin approving/rejecting
-const adminDisbursement = require('./routes/adminDisbursement');  // Admin disbursement
-const adminApprovedLoans = require("./routes/adminApprovedLoans");// Admin list approved loans
+// Route Modules
+const loanRoutes = require("./routes/loanRoutes");
+const repaymentRoutes = require("./routes/loanPayRoutes");
+const dashboardRoutes = require("./routes/loanDashboard");
+const adminRoutes = require("./routes/admin");
+const adminLoanApprovals = require("./routes/adminLoanApprovals");
+const adminDisbursement = require("./routes/adminDisbursement");
+const adminApprovedLoans = require("./routes/adminApprovedLoans");
 
-// ⭐ NEW — Borrower Loan Dashboard route
-const loanDashboardRoutes = require('./routes/loanDashboard');    // ⭐ ADDED
-
+// ⭐ NEW — full loans overview
+const adminAllLoans = require("./routes/adminAllLoans");
 
 const app = express();
-const PORT = 5001;
+const PORT = process.env.PORT || 5001;
 
-// JWT secret (store in .env for production)
-const JWT_SECRET = 'a_super_secret_key_that_should_be_long_and_random';
-
+// IMPORTANT: You said YOU will update this on Railway.
+const JWT_SECRET = process.env.JWT_SECRET;
 
 // =================================================================
 //                              MIDDLEWARE
 // =================================================================
-
 app.use(cors());
 app.use(express.json());
 
-
 // =================================================================
-//                        AUTHENTICATION ROUTES
+//                           AUTH ROUTES
 // =================================================================
 
-// --- User Registration ---
-app.post('/api/auth/register', async (req, res) => {
+// ------------------------- REGISTER ------------------------------
+app.post("/api/auth/register", async (req, res) => {
   try {
-    const full_name = (req.body.full_name || req.body.fullName || '').trim();
+    const full_name = (req.body.full_name || "").trim();
     const { email, password } = req.body;
 
     if (!full_name || !email || !password) {
-      return res.status(400).json({ error: 'All fields are required.' });
+      return res.status(400).json({ error: "All fields are required." });
     }
 
-    const userCheck = await db.query('SELECT id FROM users WHERE email = $1', [email]);
-    if (userCheck.rows.length > 0) {
-      return res.status(400).json({ error: 'Email already exists.' });
+    const exists = await db.query(
+      "SELECT id FROM users WHERE email = $1 LIMIT 1",
+      [email]
+    );
+
+    if (exists.rows.length > 0) {
+      return res.status(400).json({ error: "Email already registered." });
     }
 
     const passwordHash = await bcrypt.hash(password, 10);
 
-    const newUser = await db.query(
-      'INSERT INTO users (full_name, email, password_hash) VALUES ($1, $2, $3) RETURNING id, email, role',
+    const insert = await db.query(
+      `
+      INSERT INTO users (full_name, email, password_hash)
+      VALUES ($1, $2, $3)
+      RETURNING id, email, full_name, role
+      `,
       [full_name, email, passwordHash]
     );
 
-    const payload = { user: { id: newUser.rows[0].id, role: newUser.rows[0].role } };
-    const token = jwt.sign(payload, JWT_SECRET, { expiresIn: '1h' });
+    const user = insert.rows[0];
+    const token = jwt.sign(
+      { user: { id: user.id, role: user.role } },
+      JWT_SECRET,
+      { expiresIn: "7d" }
+    );
 
-    res.status(201).json({
-      message: 'User registered successfully!',
-      token,
-      user: newUser.rows[0],
-    });
+    res.json({ token, user });
   } catch (err) {
-    console.error(`❌ Register Error: ${err.message}`);
-    res.status(500).send('Server error');
+    console.error("REGISTER ERROR:", err);
+    res.status(500).json({ error: "Server error" });
   }
 });
 
-// --- Login ---
-app.post('/api/auth/login', async (req, res) => {
+// --------------------------- LOGIN -------------------------------
+app.post("/api/auth/login", async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    const userResult = await db.query('SELECT * FROM users WHERE email = $1', [email]);
-    if (userResult.rows.length === 0) {
-      return res.status(400).json({ error: 'Invalid credentials' });
+    const result = await db.query("SELECT * FROM users WHERE email = $1", [
+      email,
+    ]);
+
+    if (result.rows.length === 0) {
+      return res.status(400).json({ error: "Invalid credentials" });
     }
 
-    const user = userResult.rows[0];
-    const isValid = await bcrypt.compare(password, user.password_hash);
-    if (!isValid) {
-      return res.status(400).json({ error: 'Invalid credentials' });
-    }
+    const user = result.rows[0];
 
-    const payload = { user: { id: user.id, role: user.role } };
-    const token = jwt.sign(payload, JWT_SECRET, { expiresIn: '1h' });
+    const valid = await bcrypt.compare(password, user.password_hash);
+    if (!valid) return res.status(400).json({ error: "Invalid credentials" });
 
-    res.json({ token });
+    const safeRole = (user.role || "borrower").toUpperCase();
+
+    const token = jwt.sign(
+      { user: { id: user.id, role: safeRole } },
+      JWT_SECRET,
+      { expiresIn: "7d" }
+    );
+
+    res.json({
+      token,
+      user: {
+        id: user.id,
+        full_name: user.full_name,
+        email: user.email,
+        role: safeRole,
+      },
+    });
   } catch (err) {
-    console.error(`❌ Login Error: ${err.message}`);
-    res.status(500).send('Server error');
+    console.error("LOGIN ERROR:", err);
+    res.status(500).json({ error: "Server error" });
   }
 });
 
-// --- Get Current Authenticated User ---
-app.get('/api/auth/me', authMiddleware, async (req, res) => {
+// --------------------------- ME ---------------------------------
+app.get("/api/auth/me", authMiddleware, async (req, res) => {
   try {
-    const user = await db.query(
-      'SELECT id, email, full_name, role FROM users WHERE id = $1',
+    const rs = await db.query(
+      `SELECT id, email, full_name, role FROM users WHERE id = $1`,
       [req.user.id]
     );
-    res.json(user.rows[0]);
+
+    if (rs.rows.length === 0) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    const user = rs.rows[0];
+    user.role = user.role ? user.role.toUpperCase() : "BORROWER";
+
+    res.json(user);
   } catch (err) {
-    console.error(`❌ /me Error: ${err.message}`);
-    res.status(500).send('Server Error');
+    console.error("/auth/me ERROR:", err);
+    res.status(500).json({ error: "Server error" });
   }
 });
 
-
 // =================================================================
-//                     USER (BORROWER) ROUTES
+//                      USER LOAN & REPAYMENT ROUTES
 // =================================================================
-
-app.use('/api/loans', loanRoutes);  // loan apply, list, etc.
-
-
-// =================================================================
-//                     ⭐ BORROWER DASHBOARD ROUTES
-// =================================================================
-// This powers the borrower's home screen (Amount Due, Withdraw, Summary)
-// ⭐ This is the section you asked for.
-app.use('/api/users', loanDashboardRoutes);   // ⭐ ADDED
-
+app.use("/api/loans", loanRoutes);       // Applications, my-loans
+app.use("/api/repayments", repaymentRoutes);
+app.use("/api/loans", repaymentRoutes);  // compatibility
+app.use("/api/dashboard", dashboardRoutes);
 
 // =================================================================
 //                           ADMIN ROUTES
 // =================================================================
+app.use("/api/admin", adminRoutes);
+app.use("/api/admin", adminLoanApprovals);
+app.use("/api/admin", adminDisbursement);
+app.use("/api/admin", adminApprovedLoans);
 
-app.use('/api/admin', adminRoutes);          // dashboard stats
-app.use('/api/admin', adminLoanApprovals);   // approve/reject
-app.use('/api/admin', adminDisbursement);    // disburse
-app.use('/api/admin', adminApprovedLoans);   // list approved loans
-
+// ⭐ NEW — All Loans Overview
+app.use("/api/admin", adminAllLoans);
 
 // =================================================================
-//                      USER BALANCE & TRANSACTIONS
+//                   USER BALANCE & TRANSACTIONS
 // =================================================================
 
-app.get('/api/users/balance', authMiddleware, async (req, res) => {
+// Wallet Balance
+app.get("/api/users/balance", authMiddleware, async (req, res) => {
   try {
-    const userId = req.user.id;
-
-    const balanceRes = await db.query(
-      `SELECT COALESCE(SUM(
+    const result = await db.query(
+      `
+      SELECT COALESCE(SUM(
         CASE
-          WHEN LOWER(type) IN ('deposit','cash_deposit','cash deposit') THEN amount
-          WHEN LOWER(type) IN ('withdrawal','cash_withdrawal','withdraw') THEN -amount
-          WHEN LOWER(type) IN ('loan_disbursement','loan_issued') THEN amount
+          WHEN LOWER(type) IN ('deposit','cash deposit','cash_deposit') THEN amount
+          WHEN LOWER(type) IN ('withdrawal','withdraw','cash_withdrawal') THEN -amount
+          WHEN LOWER(type) IN ('loan_disbursement') THEN amount
           WHEN LOWER(type) IN ('loan_payment','loan payment') THEN -amount
           ELSE 0
         END
-      ), 0) AS balance
+      ),0) AS balance
       FROM transactions
-      WHERE user_id = $1`,
-      [userId]
-    );
-
-    res.json({ balance: Number(balanceRes.rows[0].balance || 0) });
-  } catch (err) {
-    console.error(`❌ Balance Error: ${err.message}`);
-    res.status(500).send('Server Error');
-  }
-});
-
-// --- User Transaction History ---
-app.get('/api/transactions/my', authMiddleware, async (req, res) => {
-  try {
-    const txRes = await db.query(
-      'SELECT id, type, amount, loan_id, created_at FROM transactions WHERE user_id = $1 ORDER BY created_at DESC LIMIT 10',
+      WHERE user_id = $1
+      `,
       [req.user.id]
     );
 
-    res.json(txRes.rows);
+    res.json({ balance: Number(result.rows[0].balance || 0) });
   } catch (err) {
-    console.error(`❌ Transactions Error: ${err.message}`);
-    res.status(500).send('Server Error');
+    console.error("Balance ERROR:", err);
+    res.status(500).json({ error: "Server error" });
   }
 });
 
+// Recent Transactions
+app.get("/api/transactions/my", authMiddleware, async (req, res) => {
+  try {
+    const tx = await db.query(
+      `
+      SELECT id, type, amount, loan_id, payment_method, created_at
+      FROM transactions
+      WHERE user_id = $1
+      ORDER BY created_at DESC
+      LIMIT 10
+      `,
+      [req.user.id]
+    );
+
+    res.json(tx.rows);
+  } catch (err) {
+    console.error("Transactions ERROR:", err);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+// Full Payment History
+app.get("/api/transactions/my-payments", authMiddleware, async (req, res) => {
+  try {
+    const tx = await db.query(
+      `
+      SELECT id, type, amount, payment_method, loan_id, created_at
+      FROM transactions
+      WHERE user_id = $1
+      AND (type = 'loan_payment' OR type = 'late_fee')
+      ORDER BY created_at DESC
+      `,
+      [req.user.id]
+    );
+
+    res.json(tx.rows);
+  } catch (err) {
+    console.error("Payment history ERROR:", err);
+    res.status(500).json({ error: "Server error" });
+  }
+});
 
 // =================================================================
 //                              TEST ROUTE
 // =================================================================
-
-app.get('/api/test', (req, res) => {
-  res.json({ message: 'Backend is reachable ✅' });
+app.get("/api/test", (req, res) => {
+  res.json({ message: "Backend OK" });
 });
-
 
 // =================================================================
 //                           START SERVER
 // =================================================================
-
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 Server running at http://192.168.1.222:${PORT}`);
-});
+app.listen(PORT, "0.0.0.0", () =>
+  console.log(`🚀 Backend running on port ${PORT}`)
+);

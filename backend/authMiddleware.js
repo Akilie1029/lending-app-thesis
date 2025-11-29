@@ -1,53 +1,55 @@
-// =================================================================
-//                  AUTH MIDDLEWARE (Stable Version)
-// =================================================================
+// authMiddleware.js
+// Verifies Bearer JWT in Authorization header and attaches normalized user to req.user
 
-const jwt = require('jsonwebtoken');
+const jwt = require("jsonwebtoken");
 
-// ⚠️ IMPORTANT: Must match JWT_SECRET used in your /auth/login and /auth/register routes
-const JWT_SECRET = 'a_super_secret_key_that_should_be_long_and_random';
+// Use environment variable; fallback for local dev only.
+const JWT_SECRET = process.env.JWT_SECRET || "TEMP_DEV_SECRET";
 
 module.exports = function (req, res, next) {
-  const authHeader = req.headers['authorization'];
-
-  // 🔎 Step 1: Check Authorization header
-  console.log('🔐 Incoming Authorization Header:', authHeader || '(none)');
-  if (!authHeader) {
-    return res.status(401).json({ error: 'No token provided' });
-  }
-
-  // Expect header like "Bearer <token>"
-  const parts = authHeader.split(' ');
-  if (parts.length !== 2 || parts[0] !== 'Bearer') {
-    console.log('❌ Malformed Authorization header.');
-    return res.status(401).json({ error: 'Malformed token' });
-  }
-
-  const token = parts[1];
-  console.log('📦 Extracted Token:', token ? token.slice(0, 25) + '...' : 'none');
-
   try {
-    // 🧠 Step 2: Verify JWT signature
-    const decoded = jwt.verify(token, JWT_SECRET);
-    console.log('✅ JWT Verified. Decoded payload:', decoded);
-
-    // 🧩 Step 3: Normalize payload structure
-    // Some tokens may be { user: { id, email } }, others just { id, email }
-    const userPayload = decoded.user || decoded;
-
-    // 🧩 Step 4: Ensure it contains an ID
-    if (!userPayload?.id) {
-      console.log('❌ JWT payload missing user id.');
-      return res.status(401).json({ error: 'Invalid token payload' });
+    const authHeader = req.headers["authorization"] || req.headers["Authorization"];
+    if (!authHeader) {
+      return res.status(401).json({ error: "No token provided" });
     }
 
-    // ✅ Step 5: Attach user info to request
-    req.user = userPayload;
+    // Expect "Bearer <token>"
+    const parts = authHeader.split(" ");
+    if (parts.length !== 2 || parts[0] !== "Bearer") {
+      return res.status(401).json({ error: "Malformed authorization header" });
+    }
 
-    console.log('👤 Authenticated User ID:', req.user.id);
-    next();
+    const token = parts[1];
+    if (!token) {
+      return res.status(401).json({ error: "Empty token" });
+    }
+
+    let decoded;
+    try {
+      decoded = jwt.verify(token, JWT_SECRET);
+    } catch (err) {
+      // token expired, invalid signature, etc.
+      return res.status(401).json({ error: "Invalid or expired token" });
+    }
+
+    // Normalize payload: many of your routes expect req.user.id and req.user.role
+    const userPayload = decoded.user || decoded;
+    if (!userPayload || !userPayload.id) {
+      return res.status(401).json({ error: "Invalid token payload" });
+    }
+
+    // Attach minimal user object to request
+    req.user = {
+      id: userPayload.id,
+      role: (userPayload.role || "BORROWER").toString().toUpperCase(),
+      // include any other fields you trust from token (email etc.) if needed
+      ...(userPayload.email ? { email: userPayload.email } : {}),
+      ...(userPayload.full_name ? { full_name: userPayload.full_name } : {}),
+    };
+
+    return next();
   } catch (err) {
-    console.error('❌ JWT verification failed:', err.message);
-    return res.status(401).json({ error: 'Invalid or expired token' });
+    console.error("Auth middleware unexpected error:", err);
+    return res.status(500).json({ error: "Auth middleware error" });
   }
 };

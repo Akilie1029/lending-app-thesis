@@ -1,108 +1,85 @@
-// backend/routes/adminDisbursement.js
+// routes/adminDisbursement.js
 const express = require("express");
 const router = express.Router();
 const db = require("../db");
-const authMiddleware = require("../authMiddleware");
-const adminMiddleware = require("../adminMiddleware");
+const auth = require("../authMiddleware");
+const admin = require("../adminMiddleware");
 
-// Normalize allowed disbursement statuses (use everywhere)
-const ALLOWED_PENDING = [
-  "approved",
-  "approved_pending_disburse",
-  "approved_pending_disbursement",
-  "approved_for_disbursement"
-];
+// ============================================================
+//   ADMIN DISBURSEMENT: Mark loan as active + add transaction
+// ============================================================
 
-// GET /api/admin/disbursements
-router.get(
-  "/disbursements",
-  authMiddleware,
-  adminMiddleware,
-  async (req, res) => {
-    try {
-      const result = await db.query(
-        `
-        SELECT 
-          l.id, l.user_id, u.full_name,
-          l.amount_requested, l.purpose, l.repayment_term_months,
-          l.status, l.created_at
-        FROM loans l
-        JOIN users u ON u.id = l.user_id
-        WHERE LOWER(l.status) IN (${ALLOWED_PENDING.map((s, i) => `$${i + 1}`).join(",")})
-        ORDER BY l.created_at ASC
-        `,
-        ALLOWED_PENDING
-      );
-
-      res.json(result.rows);
-    } catch (err) {
-      console.error("❌ Fetch Disbursements Error:", err.message);
-      res.status(500).json({ msg: "Server Error", error: err.message });
-    }
-  }
-);
-
-// POST /api/admin/disburse/:loanId
-router.post("/disburse/:loanId", authMiddleware, adminMiddleware, async (req, res) => {
-  const loanId = req.params.loanId;
-
+router.post("/disburse/:loanId", auth, admin, async (req, res) => {
   try {
-    // 1. Get loan info
-    const loanRes = await db.query(
-      "SELECT * FROM loans WHERE id = $1",
-      [loanId]
-    );
+    const loanId = Number(req.params.loanId);
+    const { payout_reference = null } = req.body;
 
-    if (loanRes.rows.length === 0) {
-      return res.status(404).json({ msg: "Loan not found" });
+    // 1. Fetch loan
+    const q = await db.query(`SELECT * FROM loans WHERE id = $1 LIMIT 1`, [loanId]);
+    if (q.rows.length === 0) return res.status(404).json({ error: "Loan not found" });
+
+    const loan = q.rows[0];
+
+    if (loan.status !== "approved") {
+      return res.status(400).json({ error: "Loan must be approved before disbursement" });
     }
 
-    const loan = loanRes.rows[0];
-    const status = (loan.status || "").toLowerCase();
+    const disbursedAt = new Date().toISOString();
 
-    const allowed = [
-      "approved",
-      "approved_pending_disburse",
-      "approved_pending_disbursement",
-      "approved_for_disbursement"
-    ];
-
-    if (!allowed.includes(status)) {
-      return res.status(400).json({
-        msg: "Loan is not approved for disbursement",
-        currentStatus: loan.status,
-      });
-    }
-
-    const userId = loan.user_id;
-    const amount = Number(loan.amount_requested) || 0;
-
-    // 2. Insert transaction record
+    // 2. Record disbursement transaction
     await db.query(
-      `INSERT INTO transactions (user_id, type, amount, loan_id, created_at)
-       VALUES ($1, 'loan_disbursement', $2, $3, NOW())`,
-      [userId, amount, loanId]
+      `
+      INSERT INTO transactions (user_id, loan_id, type, amount, payment_method, reference_no)
+      VALUES ($1, $2, 'loan_disbursement', $3, $4, $5)
+      `,
+      [
+        loan.user_id,
+        loan.id,
+        loan.principal,
+        loan.payout_method || "bank",
+        payout_reference,
+      ]
     );
 
-    // 3. Update loan status → active
-    const updatedLoan = await db.query(
-      `UPDATE loans
-       SET status = 'active', disbursed_at = NOW()
-       WHERE id = $1
-       RETURNING id, user_id, amount_requested, status, disbursed_at`,
-      [loanId]
+    // 3. Insert into disbursement_history (optional but useful)
+    await db.query(
+      `
+      INSERT INTO disbursement_history (loan_id, user_id, amount, payout_method, payout_reference, disbursed_at)
+      VALUES ($1, $2, $3, $4, $5, $6)
+      `,
+      [
+        loan.id,
+        loan.user_id,
+        loan.principal,
+        loan.payout_method || "bank",
+        payout_reference,
+        disbursedAt,
+      ]
     );
 
-    return res.json({
-      msg: "Loan disbursed successfully!",
-      loan: updatedLoan.rows[0],
+    // 4. Activate loan
+    const result = await db.query(
+      `
+      UPDATE loans
+      SET status = 'active',
+          disbursed_at = $1,
+          remaining_balance = total_payable
+      WHERE id = $2
+      RETURNING *
+      `,
+      [disbursedAt, loanId]
+    );
+
+    const updatedLoan = result.rows[0];
+
+    res.json({
+      message: "Loan successfully disbursed",
+      loan: updatedLoan,
     });
-
   } catch (err) {
-    console.error("❌ Disbursement Error:", err.message);
-    return res.status(500).json({ msg: "Server Error", error: err.message });
+    console.error("❌ Disbursement error:", err);
+    res.status(500).json({ error: "Server error" });
   }
 });
-
 
 module.exports = router;

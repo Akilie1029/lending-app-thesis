@@ -1,178 +1,101 @@
-// backend/routes/loanDashboard.js
-// New endpoints:
-// GET  /api/users/loan-dashboard   -> returns monthlyDue, availableToWithdraw, loanSummary
-// POST /api/users/withdraw        -> create a withdrawal of available loan funds (records a transaction)
-
-const express = require('express');
+// routes/loanDashboard.js
+const express = require("express");
 const router = express.Router();
-const db = require('../db');
-const authMiddleware = require('../authMiddleware');
+const db = require("../db");
+const auth = require("../authMiddleware");
 
-/**
- * Helper: compute total repayment and monthly payment for KAURta Pay
- * Interest rule: monthlyRate = 0.20 (20% monthly)
- * totalRepayment = principal * (1 + monthlyRate * months)
- * monthlyPayment = totalRepayment / months
- */
-function computeLoanAmounts(principal, months) {
-  const monthlyRate = 0.2; // KAURta pay fixed 20% per month
-  const totalRepayment = Number(principal) * (1 + monthlyRate * Number(months));
-  const monthlyPayment = Number(months) > 0 ? totalRepayment / Number(months) : totalRepayment;
-  return {
-    totalRepayment: Number(totalRepayment.toFixed(2)),
-    monthlyPayment: Number(monthlyPayment.toFixed(2)),
-  };
-}
+// ---------------------------------------------
+//  CLEAN DASHBOARD: home stats & quick queries
+//  - /api/dashboard/summary        -> user summary (balance, active loan, recent tx)
+//  - /api/dashboard/global-stats   -> admin/global stats (requires admin in frontend if needed)
+// ---------------------------------------------
 
-// GET /api/users/loan-dashboard
-// Returns the main values used on the borrower dashboard:
-// - monthlyDue (this month's due payment; 0 if no active loan)
-// - availableToWithdraw (amount the borrower can withdraw from disbursed loan(s))
-// - loanSummary (principal, term, totalRepayment, monthlyPayment, status)
-router.get('/loan-dashboard', authMiddleware, async (req, res) => {
+// User dashboard summary (Home screen)
+router.get("/summary", auth, async (req, res) => {
   try {
     const userId = req.user.id;
 
-    // Find the most relevant loan for dashboard (prefer active -> approved_pending_disburse -> pending)
-    // Prioritize 'active' first. Use latest created if multiple.
-    const loanQ = `
-      SELECT *
-      FROM loans
-      WHERE user_id = $1
-      ORDER BY
+    // 1) Wallet balance
+    const balRes = await db.query(
+      `
+      SELECT COALESCE(SUM(
         CASE
-          WHEN LOWER(status) = 'active' THEN 1
-          WHEN LOWER(status) IN ('approved', 'approved_pending_disburse','approved_pending_disbursement') THEN 2
-          WHEN LOWER(status) = 'pending' THEN 3
-          ELSE 4
-        END,
-        created_at DESC
+          WHEN LOWER(type) IN ('deposit', 'cash_deposit', 'cash deposit') THEN amount
+          WHEN LOWER(type) IN ('withdrawal', 'cash_withdrawal', 'withdraw') THEN -amount
+          WHEN LOWER(type) IN ('loan_disbursement', 'loan_issued') THEN amount
+          WHEN LOWER(type) IN ('loan_payment', 'loan payment') THEN -amount
+          WHEN LOWER(type) IN ('late_fee') THEN -amount
+          ELSE 0
+        END
+      ), 0) AS balance
+      FROM transactions
+      WHERE user_id = $1
+      `,
+      [userId]
+    );
+
+    const balance = Number(balRes.rows[0]?.balance || 0);
+
+    // 2) Active loan (if any)
+    const activeRes = await db.query(
+      `
+      SELECT id, principal, total_payable, remaining_balance, days, status, disbursed_at
+      FROM loans
+      WHERE user_id = $1 AND status = 'active'
+      ORDER BY created_at DESC
       LIMIT 1
-    `;
-    const loanRes = await db.query(loanQ, [userId]);
-
-    if (loanRes.rows.length === 0) {
-      // No loan for this user
-      return res.json({
-        monthlyDue: 0,
-        availableToWithdraw: 0,
-        loanSummary: null,
-      });
-    }
-
-    const loan = loanRes.rows[0];
-    const principal = Number(loan.amount_requested || 0);
-    const months = Number(loan.repayment_term_months || 0);
-    const status = (loan.status || '').toLowerCase();
-
-    // Compute totals
-    const { totalRepayment, monthlyPayment } = computeLoanAmounts(principal, months);
-
-    // Compute availableToWithdraw:
-    // Sum loan_disbursement transactions for this loan (may be 1 row) minus any withdrawal transactions tied to this loan.
-    // If your system uses 'loan_disbursement' transaction type when the system credits the borrower's wallet,
-    // and 'withdrawal' when the user actually withdraws funds to cash out, we compute:
-    // available = SUM(loan_disbursement) - SUM(withdrawal where loan_id=loan.id)
-    const disbRes = await db.query(
-      `SELECT COALESCE(SUM(amount),0) AS disb_sum FROM transactions WHERE loan_id = $1 AND LOWER(type) = 'loan_disbursement'`,
-      [loan.id]
+      `,
+      [userId]
     );
-    const withdrawnRes = await db.query(
-      `SELECT COALESCE(SUM(amount),0) AS w_sum FROM transactions WHERE loan_id = $1 AND LOWER(type) IN ('withdrawal','cash_withdrawal')`,
-      [loan.id]
+    const activeLoan = activeRes.rows[0] || null;
+
+    // 3) Recent transactions (10)
+    const txRes = await db.query(
+      `
+      SELECT id, type, amount, payment_method, loan_id, created_at
+      FROM transactions
+      WHERE user_id = $1
+      ORDER BY created_at DESC
+      LIMIT 10
+      `,
+      [userId]
     );
 
-    const disbSum = Number(disbRes.rows[0].disb_sum || 0);
-    const wSum = Number(withdrawnRes.rows[0].w_sum || 0);
-    const availableToWithdraw = Math.max(0, Number((disbSum - wSum).toFixed(2)));
-
-    // Also provide "amountDueThisPeriod" — user wants monthlyDue to show on balance card
-    // For active loans: monthlyPayment; for approved_pending_disburse: monthlyPayment (but not due yet)
-    // For pending loans: monthlyDue = 0
-    let monthlyDue = 0;
-    if (status === 'active') {
-      monthlyDue = monthlyPayment;
-    } else if (status === 'approved' || status === 'approved_pending_disburse' || status === 'approved_pending_disbursement') {
-      // If loan approved but not yet disbursed, UI might show upcoming due or 0 — we choose 0
-      monthlyDue = 0;
-    } else {
-      monthlyDue = 0;
-    }
-
-    const loanSummary = {
-      id: loan.id,
-      principal,
-      status,
-      termMonths: months,
-      totalRepayment,
-      monthlyPayment,
-      disbursedAt: loan.disbursed_at || null,
-      approvedAt: loan.approved_at || null,
-      createdAt: loan.created_at || null,
-    };
-
-    return res.json({
-      monthlyDue: Number(monthlyDue.toFixed(2)),
-      availableToWithdraw,
-      loanSummary,
+    res.json({
+      balance,
+      activeLoan,
+      recentTransactions: txRes.rows || [],
     });
   } catch (err) {
-    console.error('❌ /loan-dashboard error:', err);
-    return res.status(500).json({ message: 'Server error', error: err.message });
+    console.error("❌ Dashboard summary error:", err);
+    res.status(500).json({ error: "Server error" });
   }
 });
 
-// POST /api/users/withdraw
-// Body: { loanId, amount }
-// Creates a 'withdrawal' transaction tied to loan_id and ensures amount <= availableToWithdraw
-router.post('/withdraw', authMiddleware, async (req, res) => {
-  const userId = req.user.id;
-  const { loanId, amount } = req.body;
-
-  if (!loanId || !amount || Number(amount) <= 0) {
-    return res.status(400).json({ message: 'loanId and positive amount are required' });
-  }
-
-  // run in a transaction to avoid race conditions
-  const client = await db.connect();
+// Public/global stats (useful for admin home)
+router.get("/global-stats", auth, async (req, res) => {
   try {
-    await client.query('BEGIN');
+    // basic aggregation: total users, total loans, active loans, pending loans, total disbursed
+    const statsPromise = Promise.all([
+      db.query(`SELECT COUNT(*) AS total_users FROM users`),
+      db.query(`SELECT COUNT(*) AS total_loans FROM loans`),
+      db.query(`SELECT COUNT(*) AS active_loans FROM loans WHERE status = 'active'`),
+      db.query(`SELECT COUNT(*) AS pending_loans FROM loans WHERE status = 'pending'`),
+      db.query(`SELECT COALESCE(SUM(amount),0) AS total_disbursed FROM transactions WHERE LOWER(type) IN ('loan_disbursement','loan_issued')`),
+    ]);
 
-    // Lock loan row
-    const loanRes = await client.query('SELECT id, amount_requested FROM loans WHERE id = $1 FOR UPDATE', [loanId]);
-    if (loanRes.rows.length === 0) {
-      await client.query('ROLLBACK');
-      return res.status(404).json({ message: 'Loan not found' });
-    }
+    const [usersRes, loansRes, activeRes, pendingRes, disbRes] = await statsPromise;
 
-    // compute available for that loan
-    const disbRes = await client.query(`SELECT COALESCE(SUM(amount),0) as disb_sum FROM transactions WHERE loan_id = $1 AND LOWER(type) = 'loan_disbursement'`, [loanId]);
-    const wRes = await client.query(`SELECT COALESCE(SUM(amount),0) as w_sum FROM transactions WHERE loan_id = $1 AND LOWER(type) IN ('withdrawal','cash_withdrawal')`, [loanId]);
-
-    const disbSum = Number(disbRes.rows[0].disb_sum || 0);
-    const wSum = Number(wRes.rows[0].w_sum || 0);
-    const available = Math.max(0, disbSum - wSum);
-
-    if (Number(amount) > available) {
-      await client.query('ROLLBACK');
-      return res.status(400).json({ message: 'Insufficient available funds to withdraw', available });
-    }
-
-    // Insert withdrawal transaction (ties to loan_id)
-    await client.query(
-      `INSERT INTO transactions (type, amount, created_at, user_id, loan_id)
-       VALUES ('withdrawal', $1, NOW(), $2, $3)`,
-      [amount, userId, loanId]
-    );
-
-    await client.query('COMMIT');
-    return res.json({ message: 'Withdrawal successful', withdrawn: Number(amount) });
+    res.json({
+      totalUsers: Number(usersRes.rows[0].total_users || 0),
+      totalLoans: Number(loansRes.rows[0].total_loans || 0),
+      activeLoans: Number(activeRes.rows[0].active_loans || 0),
+      pendingLoans: Number(pendingRes.rows[0].pending_loans || 0),
+      totalDisbursed: Number(disbRes.rows[0].total_disbursed || 0),
+    });
   } catch (err) {
-    await client.query('ROLLBACK');
-    console.error('❌ Withdraw error:', err);
-    return res.status(500).json({ message: 'Server error', error: err.message });
-  } finally {
-    client.release();
+    console.error("❌ Global stats error:", err);
+    res.status(500).json({ error: "Server error" });
   }
 });
 

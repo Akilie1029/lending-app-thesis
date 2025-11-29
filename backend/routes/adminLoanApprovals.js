@@ -1,92 +1,173 @@
-// backend/routes/adminLoanApprovals.js
-const express = require('express');
+// routes/adminLoanApprovals.js
+const express = require("express");
 const router = express.Router();
-const db = require('../db'); // your pg pool wrapper
-const adminMiddleware = require('../adminMiddleware'); // ensure this is correct
-const authMiddleware = require('../authMiddleware'); // require auth too
+const db = require("../db");
+const auth = require("../authMiddleware");
+const admin = require("../adminMiddleware");
 
-// GET /api/admin/loan-approvals
-router.get('/loan-approvals', authMiddleware, adminMiddleware, async (req, res) => {
-  console.log("🔥 [DEBUG] /loan-approvals was called");
-  console.log("🔥 [DEBUG] User:", req.user);
+// Utilities
+const createRepaymentSchedule = async (loan) => {
+  // loan object should contain id, principal, days, created_at, total_payable, daily_payment
+  // We'll generate 'days' rows with due_date increments starting from tomorrow (or disbursed_at + 1)
+  const schedule = [];
+  const days = Number(loan.days || 0);
+  if (days <= 0) return schedule;
 
+  // start date = tomorrow
+  const start = new Date();
+  start.setDate(start.getDate() + 1);
+
+  const daily = Number(loan.daily_payment || (loan.total_payable / days) || 0);
+
+  for (let i = 0; i < days; i++) {
+    const d = new Date(start);
+    d.setDate(start.getDate() + i);
+
+    schedule.push({
+      loan_id: loan.id,
+      due_date: d.toISOString(),
+      amount_due: daily,
+      paid: false,
+      installment_number: i + 1,
+    });
+  }
+
+  return schedule;
+};
+
+// -----------------------------
+// GET pending loans (list)
+// -----------------------------
+router.get("/pending", auth, admin, async (req, res) => {
   try {
-    const q = `
-      SELECT l.id, l.user_id, u.full_name, l.amount_requested, l.purpose,
-             l.repayment_term_months, l.status, l.created_at
-      FROM loans l
-      LEFT JOIN users u ON u.id = l.user_id
-      WHERE LOWER(l.status) = 'pending'
-      ORDER BY l.created_at DESC
-    `;
+    const q = await db.query(
+      `
+      SELECT id, user_id, principal, days, purpose, created_at,
+             government_id_url, selfie_with_id_url, proof_of_funds_url,
+             status
+      FROM loans
+      WHERE status = 'pending'
+      ORDER BY created_at ASC
+      LIMIT 200
+      `
+    );
 
-    console.log("🔥 [DEBUG] Running query...");
-
-    const result = await db.query(q);
-
-    console.log("🔥 [DEBUG] Query returned rows:", result.rows.length);
-
-    res.json(result.rows);
+    res.json(q.rows);
   } catch (err) {
-    console.error("❌ BACKEND ERROR in /loan-approvals:", err);
-    res.status(500).json({ message: "Server error", error: err.message });
+    console.error("❌ Admin pending loans error:", err);
+    res.status(500).json({ error: "Server error" });
   }
 });
 
+// -----------------------------
+// APPROVE a loan
+// - Set status=approved (then disbursement is separate) OR optionally approve+disburse
+// - Create repayment_schedule rows
+// -----------------------------
+router.post("/approve/:loanId", auth, admin, async (req, res) => {
+  const loanId = Number(req.params.loanId);
+  const { approveAndDisburse = false } = req.body;
 
-
-// POST /api/admin/loan-approvals/:id/approve
-router.post('/loan-approvals/:id/approve', authMiddleware, adminMiddleware, async (req, res) => {
-  const loanId = req.params.id;
-  // Optionally accept notes in the body
-  const { note } = req.body || {};
   try {
-    // Update status to approved (use the status value consistent with your app)
-    // Here we set to APPROVED_PENDING_DISBURSE (matches earlier code) and fallback to 'approved'
-    const updateQ = `
-      UPDATE loans
-      SET status = 'APPROVED_PENDING_DISBURSE'
-      WHERE id = $1
-      RETURNING id, user_id, amount_requested, purpose, repayment_term_months, status, created_at
-    `;
-    const updated = await db.query(updateQ, [loanId]);
-    if (updated.rows.length === 0) {
-      return res.status(404).json({ message: 'Loan not found' });
+    // Fetch loan
+    const loanQ = await db.query(`SELECT * FROM loans WHERE id = $1 LIMIT 1`, [loanId]);
+    if (loanQ.rows.length === 0) return res.status(404).json({ error: "Loan not found" });
+
+    const loan = loanQ.rows[0];
+
+    if (loan.status !== "pending") {
+      return res.status(400).json({ error: "Loan is not pending" });
     }
 
-    // Optionally: insert a transaction/event log (not required)
-    // await db.query(`INSERT INTO events (loan_id, type, note, created_at) VALUES ($1,'APPROVED',$2,NOW())`, [loanId, note]);
+    // Mark approved
+    const approvedAt = new Date().toISOString();
+    await db.query(
+      `UPDATE loans SET status = 'approved', approved_at = $1 WHERE id = $2`,
+      [approvedAt, loanId]
+    );
 
-    res.json({ message: 'Loan approved', loan: updated.rows[0] });
+    // Generate repayment schedule (uses loan.total_payable or compute)
+    const totalPayable = Number(loan.total_payable || 0);
+    const days = Number(loan.days || 0);
+    const dailyPayment = days > 0 ? Number((totalPayable / days).toFixed(2)) : 0;
+
+    const toSchedule = {
+      id: loan.id,
+      days,
+      total_payable: totalPayable,
+      daily_payment: dailyPayment,
+    };
+
+    const scheduleItems = await createRepaymentSchedule(toSchedule);
+
+    // Bulk insert schedule
+    if (scheduleItems.length > 0) {
+      const values = [];
+      const placeholders = [];
+
+      scheduleItems.forEach((s, idx) => {
+        const pIdx = idx * 5;
+        placeholders.push(`($${pIdx + 1}, $${pIdx + 2}, $${pIdx + 3}, $${pIdx + 4}, $${pIdx + 5})`);
+        values.push(s.loan_id, s.due_date, s.amount_due, s.paid, s.installment_number);
+      });
+
+      const insertSQL = `
+        INSERT INTO repayment_schedule (loan_id, due_date, amount_due, paid, installment_number)
+        VALUES ${placeholders.join(", ")}
+      `;
+
+      await db.query(insertSQL, values);
+    }
+
+    // If immediate disbursement requested, mark disbursed: create transaction and set loan.active
+    if (approveAndDisburse) {
+      const disbursedAt = new Date().toISOString();
+
+      // transaction row
+      await db.query(
+        `INSERT INTO transactions (user_id, loan_id, type, amount, payment_method, created_at)
+         VALUES ($1, $2, 'loan_disbursement', $3, $4, $5)`,
+        [loan.user_id, loanId, loan.principal, loan.payout_method || "bank", disbursedAt]
+      );
+
+      // Update loan: status active, disbursed_at, remaining_balance = total_payable
+      await db.query(
+        `
+        UPDATE loans
+        SET status = 'active', disbursed_at = $1, remaining_balance = $2
+        WHERE id = $3
+        `,
+        [disbursedAt, Number(loan.total_payable || 0), loanId]
+      );
+    }
+
+    res.json({ message: "Loan approved", loanId, scheduledInstallments: scheduleItems.length });
   } catch (err) {
-    console.error('❌ POST /admin/loan-approvals/:id/approve error:', err);
-    res.status(500).json({ message: 'Server error' });
+    console.error("❌ Approve loan error:", err);
+    res.status(500).json({ error: "Server error" });
   }
 });
 
-// POST /api/admin/loan-approvals/:id/reject
-router.post('/loan-approvals/:id/reject', authMiddleware, adminMiddleware, async (req, res) => {
-  const loanId = req.params.id;
-  const { note } = req.body || {};
+// -----------------------------
+// REJECT a loan
+// -----------------------------
+router.post("/reject/:loanId", auth, admin, async (req, res) => {
+  const loanId = Number(req.params.loanId);
+  const { reason } = req.body;
+
   try {
-    const updateQ = `
-      UPDATE loans
-      SET status = 'REJECTED'
-      WHERE id = $1
-      RETURNING id, user_id, amount_requested, purpose, repayment_term_months, status, created_at
-    `;
-    const updated = await db.query(updateQ, [loanId]);
-    if (updated.rows.length === 0) {
-      return res.status(404).json({ message: 'Loan not found' });
-    }
+    const loanQ = await db.query(`SELECT * FROM loans WHERE id = $1 LIMIT 1`, [loanId]);
+    if (loanQ.rows.length === 0) return res.status(404).json({ error: "Loan not found" });
 
-    // Optionally log rejection reason
-    // await db.query(`INSERT INTO events (loan_id, type, note, created_at) VALUES ($1,'REJECTED',$2,NOW())`, [loanId, note]);
+    await db.query(
+      `UPDATE loans SET status = 'rejected', rejected_at = $1, rejection_reason = $2 WHERE id = $3`,
+      [new Date().toISOString(), reason || null, loanId]
+    );
 
-    res.json({ message: 'Loan rejected', loan: updated.rows[0] });
+    res.json({ message: "Loan rejected", loanId });
   } catch (err) {
-    console.error('❌ POST /admin/loan-approvals/:id/reject error:', err);
-    res.status(500).json({ message: 'Server error' });
+    console.error("❌ Reject loan error:", err);
+    res.status(500).json({ error: "Server error" });
   }
 });
 
