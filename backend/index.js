@@ -28,7 +28,13 @@ const app = express();
 const PORT = process.env.PORT || 5001;
 
 // IMPORTANT: You said YOU will update this on Railway.
-const JWT_SECRET = process.env.JWT_SECRET;
+// Load JWT secret from env. If not provided (e.g., during dev), use a local fallback.
+// NOTE: Never commit a production secret into source control. Use Railway variables for production.
+const JWT_SECRET = process.env.JWT_SECRET || "KaurtaSuperDuperStrongSecretPassword0123";
+
+// debug: helpful when checking logs to ensure JWT_SECRET loaded
+console.log("▶️ JWT_SECRET:", JWT_SECRET ? "Loaded" : "MISSING");
+
 
 // =================================================================
 //                              MIDDLEWARE
