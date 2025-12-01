@@ -8,12 +8,11 @@ const admin = require("../adminMiddleware");
 // Utilities
 const createRepaymentSchedule = async (loan) => {
   // loan object should contain id, principal, days, created_at, total_payable, daily_payment
-  // We'll generate 'days' rows with due_date increments starting from tomorrow (or disbursed_at + 1)
   const schedule = [];
   const days = Number(loan.days || 0);
   if (days <= 0) return schedule;
 
-  // start date = tomorrow
+  // Start date = tomorrow
   const start = new Date();
   start.setDate(start.getDate() + 1);
 
@@ -35,18 +34,26 @@ const createRepaymentSchedule = async (loan) => {
   return schedule;
 };
 
-// -----------------------------
-// GET pending loans (list)
-// -----------------------------
+// ============================================================
+//   GET PENDING LOANS (FIXED COLUMN NAMES)
+// ============================================================
 router.get("/pending", auth, admin, async (req, res) => {
   try {
     const q = await db.query(
       `
-      SELECT id, user_id, principal, days, purpose, created_at,
-             government_id_url, selfie_with_id_url, proof_of_funds_url,
-             status
+      SELECT 
+        id,
+        user_id,
+        principal,
+        days,
+        purpose,
+        created_at,
+        gov_id_uri,
+        selfie_id_uri,
+        proof_uri,
+        status
       FROM loans
-      WHERE status = 'pending'
+      WHERE LOWER(status) = 'pending'
       ORDER BY created_at ASC
       LIMIT 200
       `
@@ -55,21 +62,18 @@ router.get("/pending", auth, admin, async (req, res) => {
     res.json(q.rows);
   } catch (err) {
     console.error("❌ Admin pending loans error:", err);
-    res.status(500).json({ error: "Server error" });
+    res.status(500).json({ error: "Server error", details: err.message });
   }
 });
 
-// -----------------------------
-// APPROVE a loan
-// - Set status=approved (then disbursement is separate) OR optionally approve+disburse
-// - Create repayment_schedule rows
-// -----------------------------
+// ============================================================
+//   APPROVE LOAN
+// ============================================================
 router.post("/approve/:loanId", auth, admin, async (req, res) => {
   const loanId = Number(req.params.loanId);
   const { approveAndDisburse = false } = req.body;
 
   try {
-    // Fetch loan
     const loanQ = await db.query(`SELECT * FROM loans WHERE id = $1 LIMIT 1`, [loanId]);
     if (loanQ.rows.length === 0) return res.status(404).json({ error: "Loan not found" });
 
@@ -79,14 +83,13 @@ router.post("/approve/:loanId", auth, admin, async (req, res) => {
       return res.status(400).json({ error: "Loan is not pending" });
     }
 
-    // Mark approved
     const approvedAt = new Date().toISOString();
     await db.query(
       `UPDATE loans SET status = 'approved', approved_at = $1 WHERE id = $2`,
       [approvedAt, loanId]
     );
 
-    // Generate repayment schedule (uses loan.total_payable or compute)
+    // Generate schedule
     const totalPayable = Number(loan.total_payable || 0);
     const days = Number(loan.days || 0);
     const dailyPayment = days > 0 ? Number((totalPayable / days).toFixed(2)) : 0;
@@ -100,7 +103,6 @@ router.post("/approve/:loanId", auth, admin, async (req, res) => {
 
     const scheduleItems = await createRepaymentSchedule(toSchedule);
 
-    // Bulk insert schedule
     if (scheduleItems.length > 0) {
       const values = [];
       const placeholders = [];
@@ -119,18 +121,16 @@ router.post("/approve/:loanId", auth, admin, async (req, res) => {
       await db.query(insertSQL, values);
     }
 
-    // If immediate disbursement requested, mark disbursed: create transaction and set loan.active
+    // Instant approve + disburse
     if (approveAndDisburse) {
       const disbursedAt = new Date().toISOString();
 
-      // transaction row
       await db.query(
         `INSERT INTO transactions (user_id, loan_id, type, amount, payment_method, created_at)
          VALUES ($1, $2, 'loan_disbursement', $3, $4, $5)`,
         [loan.user_id, loanId, loan.principal, loan.payout_method || "bank", disbursedAt]
       );
 
-      // Update loan: status active, disbursed_at, remaining_balance = total_payable
       await db.query(
         `
         UPDATE loans
@@ -148,9 +148,9 @@ router.post("/approve/:loanId", auth, admin, async (req, res) => {
   }
 });
 
-// -----------------------------
-// REJECT a loan
-// -----------------------------
+// ============================================================
+//   REJECT LOAN
+// ============================================================
 router.post("/reject/:loanId", auth, admin, async (req, res) => {
   const loanId = Number(req.params.loanId);
   const { reason } = req.body;
