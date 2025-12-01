@@ -1,6 +1,7 @@
 // =================================================================
 //                          IMPORTS & CONFIG
 // =================================================================
+require("dotenv").config();
 
 const express = require("express");
 const cors = require("cors");
@@ -12,51 +13,54 @@ const db = require("./db");
 const authMiddleware = require("./authMiddleware");
 const adminMiddleware = require("./adminMiddleware");
 
-// Borrower Route Modules
+// Borrower Routes
 const loanRoutes = require("./routes/loanRoutes");
 const repaymentRoutes = require("./routes/loanPayRoutes");
 const dashboardRoutes = require("./routes/loanDashboard");
 
-// Admin Route Modules
+// Admin Routes
 const adminRoutes = require("./routes/admin");
 const adminLoanApprovals = require("./routes/adminLoanApprovals");
 const adminDisbursement = require("./routes/adminDisbursement");
 const adminApprovedLoans = require("./routes/adminApprovedLoans");
 const adminAllLoans = require("./routes/adminAllLoans");
 
-// NEW — Additional Admin Modules
+// Additional Admin Modules
 const adminLoanDetails = require("./routes/adminLoanDetails");
 const adminManualAdjustments = require("./routes/adminManualAdjustments");
 const adminRepaymentTools = require("./routes/adminRepaymentTools");
 const adminReports = require("./routes/adminReports");
 const disbursementHistory = require("./routes/disbursementHistory");
 
-// NEW — Admin Dashboard Stats Controller
+// Dashboard insights
 const adminStats = require("./controllers/adminStatsController");
+
+// ⭐ Cloudinary Uploads
+const uploadRoutes = require("./routes/uploadRoutes");
+
+// ⭐ Document Viewers
+const adminLoanDocuments = require("./routes/adminLoanDocuments");
+const adminUserDocuments = require("./routes/adminUserDocuments");
 
 const app = express();
 const PORT = process.env.PORT || 5001;
 
-// IMPORTANT:
-// Production uses Railway's JWT_SECRET.
-// The fallback "LOCAL_DEV_SECRET_ONLY" is ONLY for local development.
-// Never put a real secret here.
+// JWT
 const JWT_SECRET = process.env.JWT_SECRET || "LOCAL_DEV_SECRET_ONLY";
 console.log("🔐 JWT_SECRET:", JWT_SECRET ? "Loaded" : "MISSING");
 
 
 // =================================================================
-//                              MIDDLEWARE
+//                            MIDDLEWARE
 // =================================================================
 app.use(cors());
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
 
 // =================================================================
 //                           AUTH ROUTES
 // =================================================================
-
-// ------------------------- REGISTER ------------------------------
 app.post("/api/auth/register", async (req, res) => {
   try {
     const full_name = (req.body.full_name || "").trim();
@@ -70,7 +74,6 @@ app.post("/api/auth/register", async (req, res) => {
       "SELECT id FROM users WHERE email = $1 LIMIT 1",
       [email]
     );
-
     if (exists.rows.length > 0) {
       return res.status(400).json({ error: "Email already registered." });
     }
@@ -95,27 +98,24 @@ app.post("/api/auth/register", async (req, res) => {
     );
 
     res.json({ token, user });
-
   } catch (err) {
     console.error("REGISTER ERROR:", err);
     res.status(500).json({ error: "Server error" });
   }
 });
 
-
-// --------------------------- LOGIN -------------------------------
 app.post("/api/auth/login", async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    const result = await db.query("SELECT * FROM users WHERE email = $1", [email]);
-
+    const result = await db.query("SELECT * FROM users WHERE email = $1", [
+      email,
+    ]);
     if (result.rows.length === 0) {
       return res.status(400).json({ error: "Invalid credentials" });
     }
 
     const user = result.rows[0];
-
     const valid = await bcrypt.compare(password, user.password_hash);
     if (!valid) return res.status(400).json({ error: "Invalid credentials" });
 
@@ -136,15 +136,12 @@ app.post("/api/auth/login", async (req, res) => {
         role: safeRole,
       },
     });
-
   } catch (err) {
     console.error("LOGIN ERROR:", err);
     res.status(500).json({ error: "Server error" });
   }
 });
 
-
-// --------------------------- ME ---------------------------------
 app.get("/api/auth/me", authMiddleware, async (req, res) => {
   try {
     const rs = await db.query(
@@ -157,10 +154,8 @@ app.get("/api/auth/me", authMiddleware, async (req, res) => {
     }
 
     const user = rs.rows[0];
-    user.role = user.role ? user.role.toUpperCase() : "BORROWER";
-
+    user.role = (user.role || "borrower").toUpperCase();
     res.json(user);
-
   } catch (err) {
     console.error("/auth/me ERROR:", err);
     res.status(500).json({ error: "Server error" });
@@ -185,14 +180,17 @@ app.use("/api/admin", adminDisbursement);
 app.use("/api/admin", adminApprovedLoans);
 app.use("/api/admin", adminAllLoans);
 
-// Additional admin modules
 app.use("/api/admin", adminLoanDetails);
 app.use("/api/admin", adminManualAdjustments);
 app.use("/api/admin", adminRepaymentTools);
 app.use("/api/admin", adminReports);
 app.use("/api/admin", disbursementHistory);
 
-// ⭐ FIXED — Admin Dashboard Stats (correct middlewares)
+// ⭐ Document Viewers
+app.use("/api/admin", adminLoanDocuments);
+app.use("/api/admin", adminUserDocuments);
+
+// Dashboard stats
 app.get(
   "/api/admin/dashboard-stats",
   authMiddleware,
@@ -202,10 +200,14 @@ app.get(
 
 
 // =================================================================
+//                   CLOUDINARY UPLOAD ROUTES
+// =================================================================
+app.use("/api/upload", uploadRoutes);
+
+
+// =================================================================
 //                   USER BALANCE & TRANSACTIONS
 // =================================================================
-
-// Wallet Balance
 app.get("/api/users/balance", authMiddleware, async (req, res) => {
   try {
     const result = await db.query(
@@ -226,15 +228,12 @@ app.get("/api/users/balance", authMiddleware, async (req, res) => {
     );
 
     res.json({ balance: Number(result.rows[0].balance || 0) });
-
   } catch (err) {
     console.error("Balance ERROR:", err);
     res.status(500).json({ error: "Server error" });
   }
 });
 
-
-// Recent Transactions
 app.get("/api/transactions/my", authMiddleware, async (req, res) => {
   try {
     const tx = await db.query(
@@ -247,17 +246,13 @@ app.get("/api/transactions/my", authMiddleware, async (req, res) => {
       `,
       [req.user.id]
     );
-
     res.json(tx.rows);
-
   } catch (err) {
     console.error("Transactions ERROR:", err);
     res.status(500).json({ error: "Server error" });
   }
 });
 
-
-// Full Payment History
 app.get("/api/transactions/my-payments", authMiddleware, async (req, res) => {
   try {
     const tx = await db.query(
@@ -270,9 +265,7 @@ app.get("/api/transactions/my-payments", authMiddleware, async (req, res) => {
       `,
       [req.user.id]
     );
-
     res.json(tx.rows);
-
   } catch (err) {
     console.error("Payment history ERROR:", err);
     res.status(500).json({ error: "Server error" });
@@ -281,23 +274,20 @@ app.get("/api/transactions/my-payments", authMiddleware, async (req, res) => {
 
 
 // =================================================================
-//                              TEST ROUTE
+//                         TEST & DEBUG ROUTES
 // =================================================================
-app.get("/api/test", (req, res) => {
-  res.json({ message: "Backend OK" });
+app.get("/api/test", (req, res) => res.json({ message: "Backend OK" }));
+app.get("/api/debug/version", (req, res) => {
+  res.json({
+    version: "v3-cloudinary-enabled",
+    hasDashboardRoute: typeof adminStats.getDashboardStats === "function",
+  });
 });
 
 
 // =================================================================
 //                           START SERVER
 // =================================================================
-app.get("/api/debug/version", (req, res) => {
-  res.json({
-    version: "v2-dashboard-fix",
-    hasDashboardRoute: typeof adminStats.getDashboardStats === "function"
-  });
-});
-
 app.listen(PORT, "0.0.0.0", () =>
   console.log(`🚀 Backend running on port ${PORT}`)
 );

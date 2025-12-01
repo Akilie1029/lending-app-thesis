@@ -34,7 +34,12 @@ export default function AdminDashboardScreen() {
   const load = async () => {
     try {
       setLoading(true);
-      const res = await api.get("/admin/dashboard");
+
+      // 🔥 FIX: USE CORRECT ENDPOINT
+      const res = await api.get("/admin/dashboard-stats");
+
+      console.log("📊 Dashboard Stats Response:", res.data);
+
       setStats(res.data || {});
     } catch (err) {
       console.log("Dashboard load error:", err?.response?.data || err);
@@ -52,6 +57,7 @@ export default function AdminDashboardScreen() {
     );
   }
 
+  // 🔥 FIXED: match backend controller fields
   const paid = stats.loanStatusDistribution?.paidAmount ?? 0;
   const unpaid = stats.loanStatusDistribution?.unpaidAmount ?? 0;
   const overdue = stats.loanStatusDistribution?.overdueAmount ?? 0;
@@ -67,20 +73,28 @@ export default function AdminDashboardScreen() {
       <View style={styles.statsRow}>
         <View style={styles.statCard}>
           <Text style={styles.statLabel}>Borrowers</Text>
-          <Text style={styles.statValue}>{stats.borrowerCount}</Text>
+
+          {/* backend: borrowerCount */}
+          <Text style={styles.statValue}>{stats.borrowerCount ?? 0}</Text>
+
           <Text style={styles.statFoot}>Active users</Text>
         </View>
 
         <View style={styles.statCard}>
           <Text style={styles.statLabel}>Active Loans</Text>
-          <Text style={styles.statValue}>{stats.activeLoanCount}</Text>
+
+          {/* backend: activeLoanCount */}
+          <Text style={styles.statValue}>{stats.activeLoanCount ?? 0}</Text>
+
           <Text style={styles.statFoot}>Currently disbursed</Text>
         </View>
 
         <View style={[styles.statCard, styles.redCard]}>
           <Text style={[styles.statLabel, { color: "#fff" }]}>Rejected</Text>
+
+          {/* backend: rejectedCount */}
           <Text style={[styles.statValue, { color: "#fff" }]}>
-            {stats.rejectedCount}
+            {stats.rejectedCount ?? 0}
           </Text>
           <Text style={[styles.statFoot, { color: "#ffe" }]}>Declined</Text>
         </View>
@@ -97,7 +111,7 @@ export default function AdminDashboardScreen() {
           <Text style={styles.pendingDark}>Pending Loan Approval</Text>
           <View style={styles.pendingCountYellow}>
             <Text style={styles.pendingNumDark}>
-              {stats.pendingLoanApproval}
+              {stats.pendingLoanApproval ?? 0}
             </Text>
           </View>
         </TouchableOpacity>
@@ -111,7 +125,7 @@ export default function AdminDashboardScreen() {
           <Text style={styles.pendingLight}>Pending Disbursement</Text>
           <View style={styles.pendingCountLight}>
             <Text style={styles.pendingNumRed}>
-              {stats.pendingDisbursement}
+              {stats.pendingDisbursement ?? 0}
             </Text>
           </View>
         </TouchableOpacity>
@@ -149,10 +163,16 @@ export default function AdminDashboardScreen() {
 
         <LineChart
           data={{
-            labels: stats.paymentOverview4.labels,
+            labels: stats.paymentOverview4?.labels || [],
             datasets: [
-              { data: stats.paymentOverview4.expected, color: () => "#007AFF" },
-              { data: stats.paymentOverview4.actual, color: () => "#34C759" },
+              {
+                data: stats.paymentOverview4?.expected || [],
+                color: () => "#007AFF",
+              },
+              {
+                data: stats.paymentOverview4?.actual || [],
+                color: () => "#34C759",
+              },
             ],
           }}
           width={CHART_WIDTH}
@@ -174,8 +194,12 @@ export default function AdminDashboardScreen() {
 
         <BarChart
           data={{
-            labels: stats.weeklyCollections.labels,
-            datasets: [{ data: stats.weeklyCollections.values }],
+            labels: stats.weeklyCollections?.labels || [],
+            datasets: [
+              {
+                data: stats.weeklyCollections?.values || [],
+              },
+            ],
           }}
           width={CHART_WIDTH}
           height={220}
@@ -190,16 +214,22 @@ export default function AdminDashboardScreen() {
         />
       </View>
 
-      {/* BEHAVIOR ANALYTICS */}
+      {/* PAYMENT BEHAVIOR */}
       <View style={styles.panel}>
         <Text style={styles.panelTitle}>Payment Behavior</Text>
 
         <BarChart
           data={{
-            labels: stats.paymentBehavior.labels,
+            labels: stats.paymentBehavior?.labels || [],
             datasets: [
-              { data: stats.paymentBehavior.onTime, color: () => "#0A84FF" },
-              { data: stats.paymentBehavior.late, color: () => "#FF3B30" },
+              {
+                data: stats.paymentBehavior?.onTime || [],
+                color: () => "#0A84FF",
+              },
+              {
+                data: stats.paymentBehavior?.late || [],
+                color: () => "#FF3B30",
+              },
             ],
           }}
           width={CHART_WIDTH}
@@ -220,12 +250,13 @@ export default function AdminDashboardScreen() {
 
         <LineChart
           data={{
-            labels: stats.cashflow.labels.map((l: string, i: number) =>
-              i % 2 === 0 ? l : ""
-            ),
+            labels:
+              stats.cashflow?.labels?.map((l: string, i: number) =>
+                i % 2 === 0 ? l : ""
+              ) || [],
             datasets: [
-              { data: stats.cashflow.repaid, color: () => "#0A84FF" },
-              { data: stats.cashflow.disbursed, color: () => "#FF3B30" },
+              { data: stats.cashflow?.repaid || [], color: () => "#0A84FF" },
+              { data: stats.cashflow?.disbursed || [], color: () => "#FF3B30" },
             ],
           }}
           width={CHART_WIDTH}

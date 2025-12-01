@@ -1,15 +1,6 @@
-// ======================================================================
-// 📦 Gradle Build Configuration for LendingApp (React Native)
-// ======================================================================
-
+// Build file for RN 0.81 apps
 
 buildscript {
-    ext {
-        compileSdkVersion = 36
-        targetSdkVersion = 36
-        minSdkVersion = 24
-    }
-
     repositories {
         google()
         mavenCentral()
@@ -20,43 +11,20 @@ buildscript {
     }
 }
 
-
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("com.facebook.react")
 }
 
-// ======================================================================
-// 🛠️ FIX: Required by Reanimated + SVG
-// Make ReactAndroid folder discoverable
-// ======================================================================
-ext {
-    REACT_NATIVE_NODE_MODULES_DIR = file("$rootDir/../node_modules/react-native")
-}
-
-// ======================================================================
-// ⚙️ Project Flags
-// ======================================================================
-
-def hermesEnabled = project.hasProperty('hermesEnabled')
-        ? project.getProperty('hermesEnabled').toBoolean()
-        : true
-
-def enableProguardInReleaseBuilds = false
-
-// ======================================================================
-// 🧩 Android Configuration
-// ======================================================================
 android {
     namespace "com.lendingapp"
-    compileSdk 36
-    buildToolsVersion "36.0.0"
+    compileSdk 34
 
     defaultConfig {
         applicationId "com.lendingapp"
-        minSdkVersion 24
-        targetSdk 36
+        minSdk 24
+        targetSdk 34
         versionCode 1
         versionName "1.0"
     }
@@ -76,8 +44,9 @@ android {
         }
         release {
             signingConfig signingConfigs.debug
-            minifyEnabled enableProguardInReleaseBuilds
-            proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'),
+                    'proguard-rules.pro'
         }
     }
 
@@ -97,19 +66,14 @@ react {
 
 dependencies {
     implementation("com.facebook.react:react-android")
-
-    if (hermesEnabled) {
-        implementation("com.facebook.react:hermes-android")
-    } else {
-        implementation("io.github.react-native-community:jsc-android:2026004.+")
-    }
+    implementation("com.facebook.react:hermes-android")
 
     project.ext.vectoricons = [
-        iconFontNames: [
-            'MaterialCommunityIcons.ttf',
-            'Ionicons.ttf',
-            'Feather.ttf'
-        ]
+            iconFontNames: [
+                    'MaterialCommunityIcons.ttf',
+                    'Ionicons.ttf',
+                    'Feather.ttf'
+            ]
     ]
     apply from: "../../node_modules/react-native-vector-icons/fonts.gradle"
 }

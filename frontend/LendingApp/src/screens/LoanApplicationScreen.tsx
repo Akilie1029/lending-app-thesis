@@ -121,6 +121,37 @@ export default function LoanApplicationScreen({ navigation }: any) {
   };
 
   // --------------------------------------------------------------------
+// UPLOAD FILE TO BACKEND (Cloudinary via API)
+// --------------------------------------------------------------------
+const uploadDocument = async (uri: string, endpoint: string) => {
+  const form = new FormData();
+  form.append("file", {
+    uri,
+    type: "image/jpeg",
+    name: `upload_${Date.now()}.jpg`,
+  } as any);
+
+  const token = await AsyncStorage.getItem("userToken");
+
+  const res = await fetch(`${API_BASE}${endpoint}`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "multipart/form-data",
+    },
+    body: form,
+  });
+
+  const json = await res.json();
+  if (!res.ok) {
+    throw new Error(json.error || "Upload failed");
+  }
+
+  return json; // contains { url, public_id }
+};
+
+
+  // --------------------------------------------------------------------
   // DOB INPUT
   // --------------------------------------------------------------------
   const handleDobChange = (txt: string) => {
@@ -184,70 +215,80 @@ export default function LoanApplicationScreen({ navigation }: any) {
   // --------------------------------------------------------------------
   // SUBMIT APPLICATION
   // --------------------------------------------------------------------
-  const submitApplication = async () => {
-    if (!fullName || !dob || !address || phone.length < 10) {
-      Alert.alert("Missing Info", "Please complete all personal details.");
-      return;
-    }
+const submitApplication = async () => {
+  if (!fullName || !dob || !address || phone.length < 10) {
+    Alert.alert("Missing Info", "Please complete all personal details.");
+    return;
+  }
 
-    if (!employment) return Alert.alert("Error", "Select employment status.");
-    if (!income) return Alert.alert("Error", "Select income range.");
-    if (!purpose) return Alert.alert("Error", "Enter loan purpose.");
+  if (!employment) return Alert.alert("Error", "Select employment status.");
+  if (!income) return Alert.alert("Error", "Select income range.");
+  if (!purpose) return Alert.alert("Error", "Enter loan purpose.");
 
-    if (!idFile || !selfieFile || !proofFile) {
-      return Alert.alert("Documents Missing", "All documents are required.");
-    }
+  if (!idFile || !selfieFile || !proofFile) {
+    return Alert.alert("Documents Missing", "All documents are required.");
+  }
 
-    setLoading(true);
-    try {
-      const token = await AsyncStorage.getItem("userToken");
-      if (!token) {
-        Alert.alert("Error", "User not logged in.");
-        setLoading(false);
-        return;
-      }
+  setLoading(true);
 
-      const payload = {
-        full_name: fullName,
-        date_of_birth: dob,
-        address,
-        phone_number: "+63" + phone,
-        employment_status: employment,
-        company_name: company,
-        monthly_income_range: income,
+  try {
+    // 1️⃣ UPLOAD ID
+    const idUpload = await uploadDocument(idFile.uri, "/upload/valid-id");
 
-        principal,
-        days: duration,
-        purpose,
+    // 2️⃣ UPLOAD SELFIE
+    const selfieUpload = await uploadDocument(
+      selfieFile.uri,
+      "/upload/id-selfie"
+    );
 
-        payout_method: payoutMethod,
-        payout_details: payoutDetails,
+    // 3️⃣ UPLOAD PROOF OF INCOME
+    const proofUpload = await uploadDocument(
+      proofFile.uri,
+      "/upload/proof-income"
+    );
 
-        // Important: still send local URIs — backend now handles Cloudinary
-        government_id_local_uri: idFile.uri,
-        selfie_with_id_local_uri: selfieFile.uri,
-        proof_of_funds_local_uri: proofFile.uri,
-      };
+    // 4️⃣ SEND LOAN APPLICATION
+    const payload = {
+      full_name: fullName,
+      date_of_birth: dob,
+      address,
+      phone_number: "+63" + phone,
+      employment_status: employment,
+      company_name: company,
+      monthly_income_range: income,
 
-      const res = await api.post("/loans/apply", payload);
+      principal,
+      days: duration,
+      purpose,
 
-      Alert.alert("Success", "Loan application submitted!", [
-        {
-          text: "OK",
-          onPress: () =>
-            navigation.reset({
-              index: 0,
-              routes: [{ name: "Home" }],
-            }),
-        },
-      ]);
-    } catch (err: any) {
-      console.error("Loan apply error:", err);
-      Alert.alert("Failed", err?.message || "Loan application failed.");
-    } finally {
-      setLoading(false);
-    }
-  };
+      payout_method: payoutMethod,
+      payout_details: payoutDetails,
+
+      // URLs returned by backend upload routes
+      valid_id_url: idUpload.url,
+      selfie_id_url: selfieUpload.url,
+      proof_income_url: proofUpload.url,
+    };
+
+    const res = await api.post("/loans/apply", payload);
+
+    Alert.alert("Success", "Loan application submitted!", [
+      {
+        text: "OK",
+        onPress: () =>
+          navigation.reset({
+            index: 0,
+            routes: [{ name: "Home" }],
+          }),
+      },
+    ]);
+  } catch (err: any) {
+    console.error("Loan apply error:", err);
+    Alert.alert("Failed", err?.message || "Loan application failed.");
+  } finally {
+    setLoading(false);
+  }
+};
 
   // --------------------------------------------------------------------
   // MODAL RENDER

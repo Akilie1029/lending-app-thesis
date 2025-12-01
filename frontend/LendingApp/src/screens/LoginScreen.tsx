@@ -38,8 +38,13 @@ const LoginScreen = ({ navigation }: LoginScreenProps) => {
     try {
       setLoading(true);
 
-      // 1) Login to get token
+      // NOTE:
+      // Backend JWT_SECRET is set to:
+      // "KaurtaSuperDuperStrongSecretPassword0123"
+      // This enables proper token signing during login.
       console.log("LOGIN → API_BASE:", API_BASE);
+
+      // 1) Login to get token
       const loginRes = await axios.post(`${API_BASE}/auth/login`, {
         email,
         password,
@@ -53,7 +58,7 @@ const LoginScreen = ({ navigation }: LoginScreenProps) => {
       // Save token
       await AsyncStorage.setItem("userToken", token);
 
-      // 2) Fetch user details (me)
+      // 2) Fetch user details
       const meRes = await axios.get(`${API_BASE}/auth/me`, {
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -70,14 +75,16 @@ const LoginScreen = ({ navigation }: LoginScreenProps) => {
       } else {
         navigation.reset({
           index: 0,
-          routes: [{ name: "Home" as any }],
+          routes: [{ name: "Drawer" as any }],
         });
       }
     } catch (error: any) {
       console.log("Login error:", error?.response?.data || error.message);
       Alert.alert(
         "Login Failed",
-        error?.response?.data?.error || error?.response?.data?.message || "Invalid credentials"
+        error?.response?.data?.error ||
+          error?.response?.data?.message ||
+          "Invalid credentials"
       );
     } finally {
       setLoading(false);
@@ -145,6 +152,8 @@ const LoginScreen = ({ navigation }: LoginScreenProps) => {
 };
 
 export default LoginScreen;
+
+// ...styles unchanged
 
 const styles = StyleSheet.create({
   gradientBackground: {
