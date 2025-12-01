@@ -24,22 +24,25 @@ const adminDisbursement = require("./routes/adminDisbursement");
 const adminApprovedLoans = require("./routes/adminApprovedLoans");
 const adminAllLoans = require("./routes/adminAllLoans");
 
-// ⭐ NEW — Missing Admin Routes (found in your backend.zip)
+// NEW — Additional Admin Modules
 const adminLoanDetails = require("./routes/adminLoanDetails");
 const adminManualAdjustments = require("./routes/adminManualAdjustments");
 const adminRepaymentTools = require("./routes/adminRepaymentTools");
 const adminReports = require("./routes/adminReports");
 const disbursementHistory = require("./routes/disbursementHistory");
 
-// ⭐ NEW — Admin Dashboard Stats Controller
+// NEW — Admin Dashboard Stats Controller
 const adminStats = require("./controllers/adminStatsController");
 
 const app = express();
 const PORT = process.env.PORT || 5001;
 
-// IMPORTANT: Use Railway's JWT_SECRET, fallback only for local dev
-const JWT_SECRET = process.env.JWT_SECRET || "TEMP_LOCAL_SECRET";
-console.log("▶️ JWT_SECRET Loaded? →", JWT_SECRET ? "YES" : "NO");
+// IMPORTANT:
+// Production uses Railway's JWT_SECRET.
+// The fallback "LOCAL_DEV_SECRET_ONLY" is ONLY for local development.
+// Never put a real secret here.
+const JWT_SECRET = process.env.JWT_SECRET || "LOCAL_DEV_SECRET_ONLY";
+console.log("🔐 JWT_SECRET:", JWT_SECRET ? "Loaded" : "MISSING");
 
 
 // =================================================================
@@ -84,6 +87,7 @@ app.post("/api/auth/register", async (req, res) => {
     );
 
     const user = insert.rows[0];
+
     const token = jwt.sign(
       { user: { id: user.id, role: user.role } },
       JWT_SECRET,
@@ -165,11 +169,10 @@ app.get("/api/auth/me", authMiddleware, async (req, res) => {
 
 
 // =================================================================
-//                      USER LOAN & REPAYMENT ROUTES
+//                        USER LOAN & PAYMENT ROUTES
 // =================================================================
 app.use("/api/loans", loanRoutes);
 app.use("/api/repayments", repaymentRoutes);
-app.use("/api/loans", repaymentRoutes);  // compatibility
 app.use("/api/dashboard", dashboardRoutes);
 
 
@@ -182,16 +185,20 @@ app.use("/api/admin", adminDisbursement);
 app.use("/api/admin", adminApprovedLoans);
 app.use("/api/admin", adminAllLoans);
 
-// ⭐ NEW — Missing Admin Routes (now mounted)
+// Additional admin modules
 app.use("/api/admin", adminLoanDetails);
 app.use("/api/admin", adminManualAdjustments);
 app.use("/api/admin", adminRepaymentTools);
 app.use("/api/admin", adminReports);
 app.use("/api/admin", disbursementHistory);
 
-// ⭐ NEW — FIX: Admin Dashboard Stats (prevents "Loading dashboard")
-app.get("/api/admin/dashboard-stats", adminMiddleware, adminStats.getDashboardStats);
-
+// ⭐ FIXED — Admin Dashboard Stats (correct middlewares)
+app.get(
+  "/api/admin/dashboard-stats",
+  authMiddleware,
+  adminMiddleware,
+  adminStats.getDashboardStats
+);
 
 
 // =================================================================
