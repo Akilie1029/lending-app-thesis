@@ -12,28 +12,34 @@ const db = require("./db");
 const authMiddleware = require("./authMiddleware");
 const adminMiddleware = require("./adminMiddleware");
 
-// Route Modules
+// Borrower Route Modules
 const loanRoutes = require("./routes/loanRoutes");
 const repaymentRoutes = require("./routes/loanPayRoutes");
 const dashboardRoutes = require("./routes/loanDashboard");
+
+// Admin Route Modules
 const adminRoutes = require("./routes/admin");
 const adminLoanApprovals = require("./routes/adminLoanApprovals");
 const adminDisbursement = require("./routes/adminDisbursement");
 const adminApprovedLoans = require("./routes/adminApprovedLoans");
-
-// ⭐ NEW — full loans overview
 const adminAllLoans = require("./routes/adminAllLoans");
+
+// ⭐ NEW — Missing Admin Routes (found in your backend.zip)
+const adminLoanDetails = require("./routes/adminLoanDetails");
+const adminManualAdjustments = require("./routes/adminManualAdjustments");
+const adminRepaymentTools = require("./routes/adminRepaymentTools");
+const adminReports = require("./routes/adminReports");
+const disbursementHistory = require("./routes/disbursementHistory");
+
+// ⭐ NEW — Admin Dashboard Stats Controller
+const adminStats = require("./controllers/adminStatsController");
 
 const app = express();
 const PORT = process.env.PORT || 5001;
 
-// IMPORTANT: You said YOU will update this on Railway.
-// Load JWT secret from env. If not provided (e.g., during dev), use a local fallback.
-// NOTE: Never commit a production secret into source control. Use Railway variables for production.
-const JWT_SECRET = process.env.JWT_SECRET || "KaurtaSuperDuperStrongSecretPassword0123";
-
-// debug: helpful when checking logs to ensure JWT_SECRET loaded
-console.log("▶️ JWT_SECRET:", JWT_SECRET ? "Loaded" : "MISSING");
+// IMPORTANT: Use Railway's JWT_SECRET, fallback only for local dev
+const JWT_SECRET = process.env.JWT_SECRET || "TEMP_LOCAL_SECRET";
+console.log("▶️ JWT_SECRET Loaded? →", JWT_SECRET ? "YES" : "NO");
 
 
 // =================================================================
@@ -41,6 +47,7 @@ console.log("▶️ JWT_SECRET:", JWT_SECRET ? "Loaded" : "MISSING");
 // =================================================================
 app.use(cors());
 app.use(express.json());
+
 
 // =================================================================
 //                           AUTH ROUTES
@@ -84,20 +91,20 @@ app.post("/api/auth/register", async (req, res) => {
     );
 
     res.json({ token, user });
+
   } catch (err) {
     console.error("REGISTER ERROR:", err);
     res.status(500).json({ error: "Server error" });
   }
 });
 
+
 // --------------------------- LOGIN -------------------------------
 app.post("/api/auth/login", async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    const result = await db.query("SELECT * FROM users WHERE email = $1", [
-      email,
-    ]);
+    const result = await db.query("SELECT * FROM users WHERE email = $1", [email]);
 
     if (result.rows.length === 0) {
       return res.status(400).json({ error: "Invalid credentials" });
@@ -125,11 +132,13 @@ app.post("/api/auth/login", async (req, res) => {
         role: safeRole,
       },
     });
+
   } catch (err) {
     console.error("LOGIN ERROR:", err);
     res.status(500).json({ error: "Server error" });
   }
 });
+
 
 // --------------------------- ME ---------------------------------
 app.get("/api/auth/me", authMiddleware, async (req, res) => {
@@ -147,19 +156,22 @@ app.get("/api/auth/me", authMiddleware, async (req, res) => {
     user.role = user.role ? user.role.toUpperCase() : "BORROWER";
 
     res.json(user);
+
   } catch (err) {
     console.error("/auth/me ERROR:", err);
     res.status(500).json({ error: "Server error" });
   }
 });
 
+
 // =================================================================
 //                      USER LOAN & REPAYMENT ROUTES
 // =================================================================
-app.use("/api/loans", loanRoutes);       // Applications, my-loans
+app.use("/api/loans", loanRoutes);
 app.use("/api/repayments", repaymentRoutes);
 app.use("/api/loans", repaymentRoutes);  // compatibility
 app.use("/api/dashboard", dashboardRoutes);
+
 
 // =================================================================
 //                           ADMIN ROUTES
@@ -168,9 +180,19 @@ app.use("/api/admin", adminRoutes);
 app.use("/api/admin", adminLoanApprovals);
 app.use("/api/admin", adminDisbursement);
 app.use("/api/admin", adminApprovedLoans);
-
-// ⭐ NEW — All Loans Overview
 app.use("/api/admin", adminAllLoans);
+
+// ⭐ NEW — Missing Admin Routes (now mounted)
+app.use("/api/admin", adminLoanDetails);
+app.use("/api/admin", adminManualAdjustments);
+app.use("/api/admin", adminRepaymentTools);
+app.use("/api/admin", adminReports);
+app.use("/api/admin", disbursementHistory);
+
+// ⭐ NEW — FIX: Admin Dashboard Stats (prevents "Loading dashboard")
+app.get("/api/admin/dashboard-stats", adminMiddleware, adminStats.getDashboardStats);
+
+
 
 // =================================================================
 //                   USER BALANCE & TRANSACTIONS
@@ -197,11 +219,13 @@ app.get("/api/users/balance", authMiddleware, async (req, res) => {
     );
 
     res.json({ balance: Number(result.rows[0].balance || 0) });
+
   } catch (err) {
     console.error("Balance ERROR:", err);
     res.status(500).json({ error: "Server error" });
   }
 });
+
 
 // Recent Transactions
 app.get("/api/transactions/my", authMiddleware, async (req, res) => {
@@ -218,11 +242,13 @@ app.get("/api/transactions/my", authMiddleware, async (req, res) => {
     );
 
     res.json(tx.rows);
+
   } catch (err) {
     console.error("Transactions ERROR:", err);
     res.status(500).json({ error: "Server error" });
   }
 });
+
 
 // Full Payment History
 app.get("/api/transactions/my-payments", authMiddleware, async (req, res) => {
@@ -239,11 +265,13 @@ app.get("/api/transactions/my-payments", authMiddleware, async (req, res) => {
     );
 
     res.json(tx.rows);
+
   } catch (err) {
     console.error("Payment history ERROR:", err);
     res.status(500).json({ error: "Server error" });
   }
 });
+
 
 // =================================================================
 //                              TEST ROUTE
@@ -251,6 +279,7 @@ app.get("/api/transactions/my-payments", authMiddleware, async (req, res) => {
 app.get("/api/test", (req, res) => {
   res.json({ message: "Backend OK" });
 });
+
 
 // =================================================================
 //                           START SERVER

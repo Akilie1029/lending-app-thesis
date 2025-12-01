@@ -1,12 +1,21 @@
-// routes/admin.js
+// backend/routes/admin.js
+
 const express = require("express");
 const router = express.Router();
 const db = require("../db");
 const auth = require("../authMiddleware");
 const admin = require("../adminMiddleware");
 
+// IMPORT ADMIN DASHBOARD CONTROLLER
+const { getDashboardStats } = require("../controllers/adminStatsController");
+
 // ===============================================================
-//                   GET ALL USERS
+//                     ADMIN DASHBOARD STATS
+// ===============================================================
+router.get("/dashboard-stats", auth, admin, getDashboardStats);
+
+// ===============================================================
+//                     GET ALL USERS
 // ===============================================================
 router.get("/users", auth, admin, async (req, res) => {
   try {
@@ -53,10 +62,13 @@ router.get("/users/search", auth, admin, async (req, res) => {
 // ===============================================================
 router.get("/user/:userId", auth, admin, async (req, res) => {
   try {
-    const userId = Number(req.params.userId);
+    // FIXED: UUIDs must NOT be converted to Number()
+    const userId = req.params.userId;
 
     const rs = await db.query(
-      `SELECT id, full_name, email, role, created_at FROM users WHERE id = $1`,
+      `SELECT id, full_name, email, role, created_at 
+       FROM users 
+       WHERE id = $1`,
       [userId]
     );
 
@@ -76,7 +88,8 @@ router.get("/user/:userId", auth, admin, async (req, res) => {
 // ===============================================================
 router.get("/user/:userId/loans", auth, admin, async (req, res) => {
   try {
-    const userId = Number(req.params.userId);
+    // FIXED UUID HANDLING
+    const userId = req.params.userId;
 
     const q = await db.query(
       `
@@ -100,7 +113,8 @@ router.get("/user/:userId/loans", auth, admin, async (req, res) => {
 // ===============================================================
 router.get("/user/:userId/transactions", auth, admin, async (req, res) => {
   try {
-    const userId = Number(req.params.userId);
+    // FIXED UUID HANDLING
+    const userId = req.params.userId;
 
     const q = await db.query(
       `
@@ -125,7 +139,8 @@ router.get("/user/:userId/transactions", auth, admin, async (req, res) => {
 // ===============================================================
 router.post("/loan/:loanId/force-complete", auth, admin, async (req, res) => {
   try {
-    const loanId = Number(req.params.loanId);
+    // FIXED UUID HANDLING
+    const loanId = req.params.loanId;
 
     const loanRes = await db.query(`SELECT * FROM loans WHERE id = $1`, [loanId]);
     if (loanRes.rows.length === 0)
