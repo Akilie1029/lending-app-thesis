@@ -291,6 +291,13 @@ app.get("/api/test", (req, res) => {
 // =================================================================
 //                           START SERVER
 // =================================================================
+app.get("/api/debug/version", (req, res) => {
+  res.json({
+    version: "v2-dashboard-fix",
+    hasDashboardRoute: typeof adminStats.getDashboardStats === "function"
+  });
+});
+
 app.listen(PORT, "0.0.0.0", () =>
   console.log(`🚀 Backend running on port ${PORT}`)
 );
