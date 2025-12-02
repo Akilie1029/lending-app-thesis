@@ -50,18 +50,32 @@ export default function AdminLoanDocumentsScreen() {
       const res = await api.get(`/admin/loan/${loanId}/documents`);
       console.log("📥 Documents Response:", res.data);
 
-      // Normalize into array of { doc_type, url }
       const loan = res.data?.loan || {};
       const list: Doc[] = [];
 
       if (loan.gov_id_uri) {
-        list.push({ id: "gov_id", loan_id: loanId, doc_type: "Government ID", url: loan.gov_id_uri });
+        list.push({
+          id: "gov_id",
+          loan_id: loanId,
+          doc_type: "Government ID",
+          url: loan.gov_id_uri,
+        });
       }
       if (loan.selfie_id_uri) {
-        list.push({ id: "selfie_id", loan_id: loanId, doc_type: "Selfie with ID", url: loan.selfie_id_uri });
+        list.push({
+          id: "selfie_id",
+          loan_id: loanId,
+          doc_type: "Selfie with ID",
+          url: loan.selfie_id_uri,
+        });
       }
       if (loan.proof_uri) {
-        list.push({ id: "proof_income", loan_id: loanId, doc_type: "Proof of Income", url: loan.proof_uri });
+        list.push({
+          id: "proof_income",
+          loan_id: loanId,
+          doc_type: "Proof of Income",
+          url: loan.proof_uri,
+        });
       }
 
       setDocs(list);
@@ -79,13 +93,15 @@ export default function AdminLoanDocumentsScreen() {
     }, [loadDocs])
   );
 
+  const handleGoBack = () => {
+    console.log("🔙 Going back to AdminLoanReviewScreen…");
+
+    navigation.navigate("AdminLoanReviewScreen", { loanId });
+  };
+
   const renderItem = ({ item }: { item: Doc }) => (
     <TouchableOpacity style={styles.card} onPress={() => setSelected(item)}>
-      <Image
-        source={{ uri: item.url }}
-        style={styles.thumbnail}
-        resizeMode="cover"
-      />
+      <Image source={{ uri: item.url }} style={styles.thumbnail} resizeMode="cover" />
       <View style={{ flex: 1, marginLeft: 12 }}>
         <Text style={styles.title}>{item.doc_type}</Text>
         <Text style={styles.metaSmall}>
@@ -100,7 +116,7 @@ export default function AdminLoanDocumentsScreen() {
     <SafeAreaView style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()}>
+        <TouchableOpacity onPress={handleGoBack}>
           <Icon name="chevron-back" size={24} color="#fff" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Loan Documents</Text>
@@ -125,10 +141,9 @@ export default function AdminLoanDocumentsScreen() {
         />
       )}
 
-      {/* Fullscreen Preview Modal */}
+      {/* Fullscreen Preview */}
       <Modal visible={!!selected} transparent animationType="slide">
         <SafeAreaView style={styles.previewContainer}>
-          {/* Close button */}
           <View style={styles.previewHeader}>
             <TouchableOpacity onPress={() => setSelected(null)} style={{ padding: 8 }}>
               <Icon name="close" size={28} color="#fff" />
@@ -137,14 +152,9 @@ export default function AdminLoanDocumentsScreen() {
             <View style={{ width: 40 }} />
           </View>
 
-          {/* Image */}
           <View style={styles.previewBody}>
             {selected ? (
-              <Image
-                source={{ uri: selected.url }}
-                style={styles.previewImage}
-                resizeMode="contain"
-              />
+              <Image source={{ uri: selected.url }} style={styles.previewImage} resizeMode="contain" />
             ) : null}
           </View>
         </SafeAreaView>

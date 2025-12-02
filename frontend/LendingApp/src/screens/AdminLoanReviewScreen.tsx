@@ -17,7 +17,6 @@ export default function AdminLoanReviewScreen({ navigation, route }: any) {
   const loanId = route.params?.loanId;
 
   const [loan, setLoan] = useState<any>(null);
-  const [schedule, setSchedule] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [processing, setProcessing] = useState(false);
 
@@ -28,16 +27,21 @@ export default function AdminLoanReviewScreen({ navigation, route }: any) {
   const loadDetails = async () => {
     try {
       setLoading(true);
-
       console.log("📡 Fetching loan details for loanId:", loanId);
 
       const res = await api.get(`/admin/loan/${loanId}/details`);
-      console.log("📥 Loan Details Response:", res.data);
+
+      console.log(
+        "📥 Loan Details Response:",
+        JSON.stringify(res.data, null, 2)
+      );
 
       setLoan(res.data.loan);
-      setSchedule(res.data.schedule || []);
     } catch (err) {
-      console.error("❌ Loan detail load error:", err?.response?.data || err);
+      console.log(
+        "❌ Loan detail load error:",
+        err?.response?.data || err?.message || err
+      );
       Alert.alert("Error", "Unable to load loan details.");
       navigation.goBack();
     } finally {
@@ -50,17 +54,41 @@ export default function AdminLoanReviewScreen({ navigation, route }: any) {
       { text: "Cancel", style: "cancel" },
       {
         text: "Approve",
-        style: "default",
         onPress: async () => {
           try {
             setProcessing(true);
-            console.log("➡️ Approving loan:", loanId);
 
-            await api.post(`/admin/loan/${loanId}/approve`);
-            Alert.alert("Approved", "Loan has been approved.");
-            navigation.goBack();
+            console.log(
+              "📤 Sending APPROVE request to:",
+              `/admin/approve/${loanId}`
+            );
+
+            const res = await api.post(`/admin/approve/${loanId}`);
+
+            console.log("✅ APPROVE Response:", res.data);
+
+            Alert.alert(
+            "Approved",
+            "Loan has been approved.",
+            [
+                {
+                text: "OK",
+                onPress: () => {
+                    console.log("🎯 Approved → navigating user back to AdminDashboard");
+                    navigation.navigate("AdminDashboard");
+                },
+                },
+            ],
+            { cancelable: false }
+            );
+
           } catch (err) {
-            console.error("❌ Approve loan error:", err?.response?.data || err);
+            console.log(
+              "❌ Approve loan error:",
+              err?.response?.status,
+              err?.response?.data,
+              err?.message
+            );
             Alert.alert("Error", "Unable to approve loan.");
           } finally {
             setProcessing(false);
@@ -79,13 +107,25 @@ export default function AdminLoanReviewScreen({ navigation, route }: any) {
         onPress: async () => {
           try {
             setProcessing(true);
-            console.log("➡️ Rejecting loan:", loanId);
 
-            await api.post(`/admin/loan/${loanId}/reject`);
+            console.log(
+              "📤 Sending REJECT request to:",
+              `/admin/reject/${loanId}`
+            );
+
+            const res = await api.post(`/admin/reject/${loanId}`);
+
+            console.log("⛔ Reject Response:", res.data);
+
             Alert.alert("Rejected", "Loan has been rejected.");
             navigation.goBack();
           } catch (err) {
-            console.error("❌ Reject loan error:", err?.response?.data || err);
+            console.log(
+              "❌ Reject loan error:",
+              err?.response?.status,
+              err?.response?.data,
+              err?.message
+            );
             Alert.alert("Error", "Unable to reject loan.");
           } finally {
             setProcessing(false);
@@ -93,11 +133,6 @@ export default function AdminLoanReviewScreen({ navigation, route }: any) {
         },
       },
     ]);
-  };
-
-  const viewDocuments = () => {
-    console.log("➡️ Viewing documents for loanId:", loanId);
-    navigation.navigate("AdminLoanDocumentsScreen", { loanId });
   };
 
   if (loading || !loan) {
@@ -110,77 +145,66 @@ export default function AdminLoanReviewScreen({ navigation, route }: any) {
   }
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 60 }}>
-
+    <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 80 }}>
       {/* HEADER */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={{ paddingRight: 10 }}>
+        <TouchableOpacity onPress={() => navigation.goBack()}>
           <Icon name="arrow-back" size={26} color="#fff" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Loan Review</Text>
         <View style={{ width: 26 }} />
       </View>
 
-      {/* LOAN INFO CARD */}
+      {/* BORROWER INFO */}
       <View style={styles.card}>
-        <Text style={styles.title}>Borrower Information</Text>
+        <Text style={styles.sectionTitle}>Borrower Information</Text>
 
-        <Text style={styles.label}>Name</Text>
-        <Text style={styles.value}>{loan.full_name}</Text>
-
-        <Text style={styles.label}>Email</Text>
-        <Text style={styles.value}>{loan.email}</Text>
-
-        <View style={styles.divider} />
-
-        <Text style={styles.title}>Loan Details</Text>
-
-        <View style={styles.row}>
-          <Text style={styles.label}>Amount</Text>
-          <Text style={styles.value}>₱ {loan.principal.toLocaleString()}</Text>
-        </View>
-
-        <View style={styles.row}>
-          <Text style={styles.label}>Term</Text>
-          <Text style={styles.value}>{loan.days} days</Text>
-        </View>
-
-        <View style={styles.row}>
-          <Text style={styles.label}>Daily Payment</Text>
-          <Text style={styles.value}>₱ {loan.daily_payment.toLocaleString()}</Text>
-        </View>
-
-        <TouchableOpacity style={styles.docBtn} onPress={viewDocuments}>
-          <Icon name="document-text-outline" size={20} color="#169AF9" />
-          <Text style={styles.docBtnText}>View Uploaded Documents</Text>
-        </TouchableOpacity>
+        <InfoRow label="Full Name" value={loan.full_name} />
+        <InfoRow label="Email" value={loan.user_email} />
+        <InfoRow label="Date of Birth" value={loan.date_of_birth} />
+        <InfoRow label="Address" value={loan.address} />
+        <InfoRow label="Phone Number" value={loan.phone_number} />
+        <InfoRow label="Employment Status" value={loan.employment_status} />
+        <InfoRow label="Company / Business" value={loan.company_name} />
+        <InfoRow label="Income Range" value={loan.monthly_income_range} />
       </View>
 
-      {/* SCHEDULE */}
+      {/* LOAN INFO */}
       <View style={styles.card}>
-        <Text style={styles.title}>Repayment Schedule</Text>
+        <Text style={styles.sectionTitle}>Loan Details</Text>
 
-        {schedule.length === 0 ? (
-          <Text style={{ color: "#777", marginTop: 8 }}>No schedule available.</Text>
-        ) : (
-          schedule.map((item, i) => (
-            <View key={i} style={styles.scheduleRow}>
-              <Text style={{ fontWeight: "700" }}>Day {item.day_number}</Text>
+        <InfoRow label="Principal" value={`₱ ${Number(loan.principal).toLocaleString()}`} />
+        <InfoRow label="Interest" value={`₱ ${Number(loan.interest).toLocaleString()}`} />
+        <InfoRow label="Total Payable" value={`₱ ${Number(loan.total_payable).toLocaleString()}`} />
+        <InfoRow label="Daily Payment" value={`₱ ${Number(loan.daily_payment).toLocaleString()}`} />
+        <InfoRow label="Duration" value={`${loan.days} days`} />
+        <InfoRow label="Purpose" value={loan.purpose} />
+      </View>
 
-              <View style={{ alignItems: "flex-end" }}>
-                <Text style={styles.smallValue}>
-                  ₱ {Number(item.expected_amount).toLocaleString()}
-                </Text>
-                <Text style={[styles.scheduleStatus, item.status === "paid" ? styles.green : styles.orange]}>
-                  {item.status.toUpperCase()}
-                </Text>
-              </View>
-            </View>
-          ))
+      {/* PAYOUT INFO */}
+      <View style={styles.card}>
+        <Text style={styles.sectionTitle}>Payout Method</Text>
+
+        <InfoRow label="Method" value={loan.payout_method.toUpperCase()} />
+
+        {loan.payout_method === "bank" && (
+          <InfoRow label="Bank Name" value={loan.payout_details?.bank} />
         )}
+
+        <InfoRow label="Account Name" value={loan.payout_details?.name} />
+        <InfoRow label="Account Number" value={loan.payout_details?.account} />
       </View>
 
-      {/* APPROVE / REJECT BUTTONS */}
+      {/* DOCUMENTS */}
+      <TouchableOpacity
+        style={styles.docBtn}
+        onPress={() => navigation.navigate("AdminLoanDocuments", { loanId: loan.id })}
+      >
+        <Icon name="document-text-outline" size={20} color="#169AF9" />
+        <Text style={styles.docBtnText}>View Uploaded Documents</Text>
+      </TouchableOpacity>
+
+      {/* APPROVE / REJECT */}
       {loan.status === "pending" && (
         <View style={styles.actionRow}>
           <TouchableOpacity
@@ -204,10 +228,18 @@ export default function AdminLoanReviewScreen({ navigation, route }: any) {
   );
 }
 
+function InfoRow({ label, value }: any) {
+  return (
+    <View style={{ marginBottom: 10 }}>
+      <Text style={styles.label}>{label}</Text>
+      <Text style={styles.value}>{value ?? "-"}</Text>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#f6f7fb" },
   center: { flex: 1, justifyContent: "center", alignItems: "center" },
-
   header: {
     backgroundColor: "#169AF9",
     paddingTop: 50,
@@ -217,7 +249,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   headerTitle: { fontSize: 20, fontWeight: "700", color: "#fff" },
-
   card: {
     backgroundColor: "#fff",
     marginHorizontal: 16,
@@ -226,47 +257,30 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     elevation: 3,
   },
-  title: { fontSize: 17, fontWeight: "800", marginBottom: 12 },
-
-  row: { flexDirection: "row", justifyContent: "space-between", marginBottom: 8 },
-  label: { color: "#777" },
-  value: { fontWeight: "800", color: "#000" },
-
-  smallValue: { fontWeight: "700", color: "#000" },
-
-  divider: {
-    height: 1,
-    backgroundColor: "#eee",
-    marginVertical: 12,
-  },
-
-  scheduleRow: {
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: "#eee",
-    flexDirection: "row",
-    justifyContent: "space-between",
-  },
-  scheduleStatus: { marginTop: 4, fontWeight: "700", fontSize: 12 },
-  green: { color: "#19d06b" },
-  orange: { color: "#e69500" },
-
+  sectionTitle: { fontSize: 16, fontWeight: "800", marginBottom: 12 },
+  label: { color: "#777", fontSize: 13, marginBottom: 2 },
+  value: { color: "#000", fontWeight: "800", fontSize: 15 },
   docBtn: {
+    backgroundColor: "#fff",
+    padding: 14,
+    margin: 16,
+    borderRadius: 10,
     flexDirection: "row",
     alignItems: "center",
-    marginTop: 14,
+    justifyContent: "center",
+    elevation: 3,
   },
   docBtnText: {
+    marginLeft: 8,
     color: "#169AF9",
     fontWeight: "700",
-    marginLeft: 8,
+    fontSize: 15,
   },
-
   actionRow: {
     flexDirection: "row",
-    marginTop: 20,
     paddingHorizontal: 16,
     justifyContent: "space-between",
+    marginTop: 20,
   },
   actionBtn: {
     flex: 1,

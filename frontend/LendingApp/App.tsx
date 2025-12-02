@@ -20,6 +20,9 @@ import MayaSimScreen from "./src/screens/MayaSimScreen";
 import BankPayScreen from "./src/screens/BankSimScreen";
 import CardPayScreen from "./src/screens/CardPayScreen";
 
+// Terms & Conditions (new)
+import TermsAndConditionsScreen from "./src/screens/TermsAndConditionsScreen";
+
 // Drawers
 import DrawerNavigator from "./src/navigation/DrawerNavigator";
 import AdminDrawerNavigator from "./src/navigation/AdminDrawerNavigator";
@@ -53,7 +56,6 @@ export default function App() {
   return (
     <NavigationContainer>
       <Stack.Navigator screenOptions={{ headerShown: false }} initialRouteName={initialRoute}>
-
         <Stack.Screen name="Login" component={LoginScreen} />
         <Stack.Screen name="Signup" component={SignupScreen} />
 
@@ -76,6 +78,9 @@ export default function App() {
         <Stack.Screen name="MayaSim" component={MayaSimScreen} />
         <Stack.Screen name="BankPay" component={BankPayScreen} />
         <Stack.Screen name="CardPay" component={CardPayScreen} />
+
+        {/* Terms & Conditions (placeholder) */}
+        <Stack.Screen name="TermsAndConditions" component={TermsAndConditionsScreen} />
       </Stack.Navigator>
     </NavigationContainer>
   );

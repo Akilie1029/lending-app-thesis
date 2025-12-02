@@ -1,4 +1,4 @@
-// src/screens/MyLoanScreen.tsx
+// FULL UPDATED MyLoanScreen.tsx
 
 import React, { useEffect, useState } from "react";
 import {
@@ -49,19 +49,14 @@ export default function MyLoanScreen({ navigation }: any) {
         return;
       }
 
-      console.log("📡 Fetching borrower loans...");
-
       const res = await axios.get(`${API_BASE}/loans/my-loans`, {
         headers: { Authorization: `Bearer ${token}` },
       });
 
-      const payload = Array.isArray(res.data) ? res.data : res.data?.loans ?? [];
-      console.log("📥 Borrower Loans:", payload);
-
+      const payload = Array.isArray(res.data) ? res.data : [];
       setLoans(payload);
     } catch (err) {
-      console.error("❌ Loan fetch error:", err?.response?.data || err.message);
-      Alert.alert("Error", "Unable to fetch loans. Please try again.");
+      console.error("❌ Loan fetch error:", err);
       setLoans([]);
     } finally {
       setLoading(false);
@@ -84,8 +79,9 @@ export default function MyLoanScreen({ navigation }: any) {
 
   const getStatusIcon = (status?: string) => {
     const s = (status || "").toLowerCase();
-    if (s === "active" || s === "approved")
-      return <Icon name="checkmark-circle" size={22} color="#00B050" />;
+    if (s === "active") return <Icon name="checkmark-circle" size={22} color="#00B050" />;
+    if (s === "approved")
+      return <Icon name="checkmark-circle" size={22} color="#008CD6" />;
     if (s === "pending") return <Icon name="time" size={22} color="#F39C12" />;
     if (s === "paid" || s === "completed")
       return <Icon name="checkmark-done-circle" size={22} color="#0077C8" />;
@@ -93,39 +89,33 @@ export default function MyLoanScreen({ navigation }: any) {
   };
 
   const computeProgress = (loan: any) => {
-    const total = Number(loan.total_payable ?? 0);
-    const remaining = Number(loan.remaining_balance ?? 0);
-    if (!total || total <= 0) return 0;
-    const paid = Math.max(0, total - remaining);
-    return Math.min(1, Math.max(0, paid / total));
+    const total = Number(loan.total_payable || 0);
+    const remaining = Number(loan.remaining_balance || 0);
+    if (total <= 0) return 0;
+    return (total - remaining) / total;
   };
 
-  const renderLoan = ({ item }: { item: any }) => {
+  const renderLoan = ({ item }: any) => {
     const id = String(item.id);
+    const status = (item.status || "").toLowerCase();
+
+    let statusLabel = status.toUpperCase();
+    if (status === "approved") statusLabel = "APPROVED — PENDING DISBURSEMENT";
 
     const isExpanded = !!expandedMap[id];
-    const principal = Number(item.principal ?? 0);
-    const total = Number(item.total_payable ?? 0);
-    const daily = Number(item.daily_payment ?? 0);
-    const remaining = Number(item.remaining_balance ?? 0);
-
+    const principal = Number(item.principal || 0);
+    const total = Number(item.total_payable || 0);
+    const daily = Number(item.daily_payment || 0);
+    const remaining = Number(item.remaining_balance || 0);
     const progress = computeProgress(item);
     const progressPct = Math.round(progress * 100);
-
-    const status = (item.status || "").toLowerCase();
-    const statusLabel = status.toUpperCase();
 
     const isPending = status === "pending";
     const isPaid = status === "completed" || status === "paid";
 
-    // ---------------------------
-    // PENDING LOANS — NO DETAILS VIEW
-    // ---------------------------
-    const detailsDisabled = isPending;
-
     return (
       <View style={styles.loanCard}>
-        <TouchableOpacity activeOpacity={0.85} onPress={() => toggleExpand(id)} style={styles.cardHeaderRow}>
+        <TouchableOpacity onPress={() => toggleExpand(id)} style={styles.cardHeaderRow}>
           <View style={{ flexDirection: "row", alignItems: "center" }}>
             {getStatusIcon(item.status)}
             <View style={{ marginLeft: 10 }}>
@@ -138,21 +128,23 @@ export default function MyLoanScreen({ navigation }: any) {
 
           <View style={{ alignItems: "flex-end" }}>
             <Text style={styles.statusText}>{statusLabel}</Text>
-            <Icon name={isExpanded ? "chevron-up" : "chevron-down"} size={22} color="#333" />
+            <Icon
+              name={isExpanded ? "chevron-up" : "chevron-down"}
+              size={22}
+              color="#333"
+            />
           </View>
         </TouchableOpacity>
 
         {isExpanded && (
           <View style={styles.cardBody}>
             {isPending && (
-              <View style={{ paddingVertical: 10 }}>
-                <Text style={{ color: "#666", fontSize: 14 }}>
-                  Your loan application is still under review.
-                </Text>
-              </View>
+              <Text style={{ paddingVertical: 10, color: "#666" }}>
+                Your loan application is still under review.
+              </Text>
             )}
 
-            {(status === "active" || status === "approved") && (
+            {(status === "approved" || status === "active") && (
               <>
                 <View style={styles.row}>
                   <Text style={styles.smallLabel}>Progress</Text>
@@ -180,13 +172,6 @@ export default function MyLoanScreen({ navigation }: any) {
                     ₱ {remaining.toLocaleString()}
                   </Text>
                 </View>
-
-                <TouchableOpacity
-                  style={styles.payNowBtn}
-                  onPress={() => navigation.navigate("RepayLoan", { loan: item })}
-                >
-                  <Text style={styles.payNowText}>Make a Payment</Text>
-                </TouchableOpacity>
               </>
             )}
 
@@ -195,12 +180,15 @@ export default function MyLoanScreen({ navigation }: any) {
               <TouchableOpacity
                 style={[
                   styles.detailsBtn,
-                  detailsDisabled ? { opacity: 0.5 } : {},
+                  isPending ? { opacity: 0.5 } : undefined,
                 ]}
-                disabled={detailsDisabled}
+                disabled={isPending}
                 onPress={() => {
-                  if (detailsDisabled) {
-                    Alert.alert("Pending", "Loan details are available once the loan is approved.");
+                  if (isPending) {
+                    Alert.alert(
+                      "Pending",
+                      "Loan details will be available once approved."
+                    );
                     return;
                   }
                   navigation.navigate("Loan Details", { loan: item });
@@ -209,9 +197,9 @@ export default function MyLoanScreen({ navigation }: any) {
                 <Text style={styles.detailsBtnText}>View Details</Text>
               </TouchableOpacity>
 
-              <View style={{ justifyContent: "center" }}>
-                <Text style={{ fontWeight: "700", color: "#169AF9" }}>{statusLabel}</Text>
-              </View>
+              <Text style={{ fontWeight: "700", color: "#169AF9" }}>
+                {statusLabel}
+              </Text>
             </View>
           </View>
         )}
@@ -222,7 +210,10 @@ export default function MyLoanScreen({ navigation }: any) {
   return (
     <View style={{ flex: 1, backgroundColor: "#f6f7fb" }}>
       <LinearGradient colors={["#169AF9", "#37AAF2"]} style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
+        <TouchableOpacity
+          onPress={() => navigation.goBack()}
+          style={styles.backButton}
+        >
           <Icon name="arrow-back" size={26} color="#fff" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>My Loans</Text>
@@ -240,7 +231,9 @@ export default function MyLoanScreen({ navigation }: any) {
             }}
             style={[styles.filterBtn, filter === f ? styles.filterBtnActive : undefined]}
           >
-            <Text style={filter === f ? styles.filterTextActive : styles.filterText}>{f}</Text>
+            <Text style={filter === f ? styles.filterTextActive : styles.filterText}>
+              {f}
+            </Text>
           </TouchableOpacity>
         ))}
       </View>
@@ -258,7 +251,9 @@ export default function MyLoanScreen({ navigation }: any) {
           ListEmptyComponent={
             <View style={styles.emptyBox}>
               <Text style={styles.emptyText}>
-                {loans.length === 0 ? "You have no loan history." : "No loans for this filter."}
+                {loans.length === 0
+                  ? "You have no loan history."
+                  : "No loans for this filter."}
               </Text>
             </View>
           }
@@ -269,23 +264,58 @@ export default function MyLoanScreen({ navigation }: any) {
 }
 
 const styles = StyleSheet.create({
-  header: { paddingTop: 50, paddingBottom: 18, paddingHorizontal: 16, flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  header: {
+    paddingTop: 50,
+    paddingBottom: 18,
+    paddingHorizontal: 16,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
   backButton: { width: 44 },
   headerTitle: { fontSize: 20, fontWeight: "700", color: "#fff" },
 
-  filterRow: { flexDirection: "row", justifyContent: "space-around", paddingHorizontal: 12, paddingVertical: 12 },
-  filterBtn: { paddingVertical: 8, paddingHorizontal: 14, borderRadius: 10, backgroundColor: "#fff", borderWidth: 1, borderColor: "#e6eef9" },
-  filterBtnActive: { backgroundColor: "#169AF9", borderColor: "#169AF9" },
+  filterRow: {
+    flexDirection: "row",
+    justifyContent: "space-around",
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+  },
+  filterBtn: {
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    borderRadius: 10,
+    backgroundColor: "#fff",
+    borderWidth: 1,
+    borderColor: "#e6eef9",
+  },
+  filterBtnActive: {
+    backgroundColor: "#169AF9",
+    borderColor: "#169AF9",
+  },
   filterText: { color: "#333", fontWeight: "600" },
   filterTextActive: { color: "#fff", fontWeight: "700" },
 
-  loanCard: { backgroundColor: "#fff", marginHorizontal: 16, marginVertical: 8, borderRadius: 12, borderWidth: 2, borderColor: "#e8f4ff" },
-  cardHeaderRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", padding: 14 },
+  loanCard: {
+    backgroundColor: "#fff",
+    marginHorizontal: 16,
+    marginVertical: 8,
+    borderRadius: 12,
+    borderWidth: 2,
+    borderColor: "#e8f4ff",
+  },
+  cardHeaderRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    padding: 14,
+  },
   loanTitle: { fontSize: 18, fontWeight: "800" },
   loanSubtitle: { fontSize: 12, color: "#666" },
   statusText: { fontSize: 12, fontWeight: "700", color: "#555", marginBottom: 4 },
 
   cardBody: { paddingHorizontal: 14, paddingBottom: 14, backgroundColor: "#fbfeff" },
+
   row: { flexDirection: "row", alignItems: "center", marginVertical: 6 },
   smallLabel: { width: 110, fontSize: 13, color: "#666" },
   smallValue: { fontSize: 14, fontWeight: "700", color: "#000" },
@@ -294,11 +324,20 @@ const styles = StyleSheet.create({
   progressFill: { height: 8, backgroundColor: "#169AF9" },
   progressPct: { fontSize: 12, color: "#666", marginTop: 6 },
 
-  payNowBtn: { marginTop: 10, backgroundColor: "#169AF9", paddingVertical: 10, borderRadius: 10, alignItems: "center" },
-  payNowText: { color: "#fff", fontWeight: "800" },
+  cardFooter: {
+    marginTop: 12,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
 
-  cardFooter: { marginTop: 12, flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
-  detailsBtn: { paddingVertical: 10, paddingHorizontal: 14, borderRadius: 10, borderWidth: 1.5, borderColor: "#169AF9" },
+  detailsBtn: {
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 10,
+    borderWidth: 1.5,
+    borderColor: "#169AF9",
+  },
   detailsBtnText: { color: "#169AF9", fontWeight: "700" },
 
   centered: { flex: 1, justifyContent: "center", alignItems: "center" },
