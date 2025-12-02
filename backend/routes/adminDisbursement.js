@@ -6,36 +6,57 @@ const auth = require("../authMiddleware");
 const admin = require("../adminMiddleware");
 
 /**
- * ADMIN DISBURSEMENT
+ * ADMIN DISBURSEMENT WORKFLOW
  *
- * Converts a loan from "approved" -> "active"
- * Adds:
- *   - Loan disbursement transaction
- *   - disbursement_history entry
- * Updates:
- *   - loans.disbursed_at
- *   - loans.remaining_balance = total_payable
- *
- * MUST treat loanId as UUID (string) — NO Number()!!
+ * 1. /disburse/pending  → list approved loans
+ * 2. /disburse/:loanId  → activate & record transaction
  */
 
+// ------------------------------------------------------
+// NEW: List all loans waiting for disbursement
+// ------------------------------------------------------
+router.get("/disburse/pending", auth, admin, async (req, res) => {
+  try {
+    console.log("📡 Fetching pending disbursements...");
+
+    const q = await db.query(
+      `
+      SELECT 
+        id, user_id, full_name, principal, total_payable,
+        daily_payment, payout_method, payout_details,
+        created_at, approved_at
+      FROM loans
+      WHERE status = 'approved'
+      ORDER BY approved_at ASC
+      `
+    );
+
+    console.log(`📦 Found ${q.rows.length} loans pending disbursement`);
+    return res.json({ loans: q.rows });
+  } catch (err) {
+    console.error("❌ Pending disbursement fetch error:", err);
+    return res.status(500).json({ error: "Server error", details: err.message });
+  }
+});
+
+// ------------------------------------------------------
+// POST /disburse/:loanId → Convert approved → active
+// ------------------------------------------------------
 router.post("/disburse/:loanId", auth, admin, async (req, res) => {
   console.log("💼 /api/admin/disburse called…");
 
-  const loanId = req.params.loanId; // keep as UUID string
+  const loanId = req.params.loanId;
   const { payout_reference = null } = req.body;
 
-  if (!loanId) {
-    return res.status(400).json({ error: "loanId is required" });
-  }
+  if (!loanId) return res.status(400).json({ error: "loanId is required" });
 
   const client = await db.connect();
 
   try {
     await client.query("BEGIN");
+
     console.log(`🔍 Fetching loan for disbursement loanId=${loanId}`);
 
-    // 1. Fetch loan (FOR UPDATE to prevent race conditions)
     const loanQ = await client.query(
       `SELECT * FROM loans WHERE id = $1 LIMIT 1 FOR UPDATE`,
       [loanId]
@@ -43,16 +64,13 @@ router.post("/disburse/:loanId", auth, admin, async (req, res) => {
 
     if (loanQ.rows.length === 0) {
       await client.query("ROLLBACK");
-      console.warn(`⚠️ Loan not found for disburse: ${loanId}`);
       return res.status(404).json({ error: "Loan not found" });
     }
 
     const loan = loanQ.rows[0];
 
-    // Only allow disbursement if loan is strictly "approved"
     if ((loan.status || "").toLowerCase() !== "approved") {
       await client.query("ROLLBACK");
-      console.warn(`⚠️ Loan ${loanId} is not approved. Current status = ${loan.status}`);
       return res.status(400).json({
         error: "Loan must be approved before disbursement",
         current_status: loan.status,
@@ -66,7 +84,6 @@ router.post("/disburse/:loanId", auth, admin, async (req, res) => {
 
     console.log(`💰 Creating loan_disbursement transaction for loanId=${loanId}`);
 
-    // 2. Create disbursement transaction
     const txRes = await client.query(
       `
       INSERT INTO transactions (user_id, loan_id, type, amount, payment_method, reference_no, created_at)
@@ -78,7 +95,6 @@ router.post("/disburse/:loanId", auth, admin, async (req, res) => {
 
     console.log("📘 Disbursement transaction created:", txRes.rows[0]);
 
-    // 3. Insert into disbursement_history
     const dhRes = await client.query(
       `
       INSERT INTO disbursement_history
@@ -91,7 +107,6 @@ router.post("/disburse/:loanId", auth, admin, async (req, res) => {
 
     console.log("🗂 disbursement_history entry:", dhRes.rows[0]);
 
-    // 4. Update loan: active + set remaining_balance = total_payable
     const updatedLoanQ = await client.query(
       `
       UPDATE loans
@@ -107,7 +122,7 @@ router.post("/disburse/:loanId", auth, admin, async (req, res) => {
 
     const updatedLoan = updatedLoanQ.rows[0];
 
-    console.log(`✅ Loan ${loanId} activated. remaining_balance=${updatedLoan.remaining_balance}`);
+    console.log(`✅ Loan activated: remaining_balance=${updatedLoan.remaining_balance}`);
 
     await client.query("COMMIT");
 
@@ -119,24 +134,10 @@ router.post("/disburse/:loanId", auth, admin, async (req, res) => {
     });
   } catch (err) {
     console.error("❌ Disbursement ERROR:", err);
-
-    try {
-      await client.query("ROLLBACK");
-    } catch (rollbackErr) {
-      console.error("❌ ROLLBACK ERROR:", rollbackErr);
-    }
-
-    return res.status(500).json({
-      error: "Server error",
-      details: err.message,
-      hint: "See backend logs for more details (adminDisbursement.js)",
-    });
+    await client.query("ROLLBACK");
+    return res.status(500).json({ error: "Server error", details: err.message });
   } finally {
-    try {
-      client.release();
-    } catch (releaseErr) {
-      console.error("❌ Error releasing DB client in disbursement:", releaseErr);
-    }
+    client.release();
   }
 });
 
