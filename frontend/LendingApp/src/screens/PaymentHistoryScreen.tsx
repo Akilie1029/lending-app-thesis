@@ -1,4 +1,5 @@
 // src/screens/PaymentHistoryScreen.tsx
+
 import React, { useEffect, useState } from "react";
 import {
   View,
@@ -7,6 +8,7 @@ import {
   FlatList,
   ActivityIndicator,
   TouchableOpacity,
+  Alert,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import axios from "axios";
@@ -21,19 +23,29 @@ export default function PaymentHistoryScreen({ navigation }: any) {
     setLoading(true);
     try {
       const token = await AsyncStorage.getItem("userToken");
+
       if (!token) {
-        setPayments([]);
-        setLoading(false);
+        console.log("❌ No token found. Redirecting to Login.");
+        navigation.reset({ index: 0, routes: [{ name: "Login" }] });
         return;
       }
 
-      const res = await axios.get(`${API_BASE}/transactions/my-payments`, {
+      console.log("📡 Fetching payment history...");
+
+      const res = await axios.get(`${API_BASE}/transactions/my`, {
         headers: { Authorization: `Bearer ${token}` },
       });
 
-      setPayments(Array.isArray(res.data) ? res.data : res.data?.payments ?? []);
-    } catch (err) {
+      console.log("📥 Payments Response:", res.data);
+
+      const payload = Array.isArray(res.data)
+        ? res.data
+        : res.data?.payments ?? [];
+
+      setPayments(payload);
+    } catch (err: any) {
       console.error("❌ Failed to load payments:", err?.response?.data || err.message);
+      Alert.alert("Error", "Unable to load payment history.");
       setPayments([]);
     } finally {
       setLoading(false);
@@ -80,12 +92,17 @@ export default function PaymentHistoryScreen({ navigation }: any) {
                 </Text>
 
                 <Text style={styles.amount}>
-                  ₱ {Number(item.amount ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                  ₱{" "}
+                  {Number(item.amount ?? 0).toLocaleString(undefined, {
+                    minimumFractionDigits: 2,
+                  })}
                 </Text>
               </View>
 
               <Text style={styles.date}>
-                {item.created_at ? new Date(item.created_at).toLocaleString() : "—"}
+                {item.created_at
+                  ? new Date(item.created_at).toLocaleString()
+                  : "—"}
               </Text>
             </View>
           )}
@@ -108,14 +125,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
     elevation: 4,
   },
-  backBtn: {
-    marginRight: 10,
-  },
-  headerTitle: {
-    fontSize: 20,
-    fontWeight: "700",
-    color: "#fff",
-  },
+  backBtn: { marginRight: 10 },
+  headerTitle: { fontSize: 20, fontWeight: "700", color: "#fff" },
 
   center: { flex: 1, justifyContent: "center", alignItems: "center" },
 

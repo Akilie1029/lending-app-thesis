@@ -1,85 +1,97 @@
-// upload.js
-const cloudinary = require("cloudinary").v2;
-const streamifier = require("streamifier");
+// backend/upload.js
+const { v2: cloudinary } = require("cloudinary");
 
-// Debug: Check env variables
-console.log("🔧 Cloudinary Config Check:");
-console.log(" - CLOUD_NAME:", process.env.CLOUDINARY_CLOUD_NAME);
-console.log(" - API_KEY:", process.env.CLOUDINARY_API_KEY ? "(loaded)" : "(missing)");
-console.log(" - API_SECRET:", process.env.CLOUDINARY_API_SECRET ? "(loaded)" : "(missing)");
+/**
+ * Cloudinary Configuration
+ * -------------------------
+ * We expect environment variables:
+ *   - CLOUDINARY_CLOUD_NAME
+ *   - CLOUDINARY_API_KEY
+ *   - CLOUDINARY_API_SECRET
+ */
 
-// Configure cloudinary
 cloudinary.config({
-  cloud_name:
-    process.env.CLOUDINARY_CLOUD_NAME ||
-    process.env.CLOUDINARY_URL?.match(/cloudinary:\/\/([^:]+):([^@]+)@([^/]+)/)?.[3],
-  api_key: process.env.CLOUDINARY_API_KEY,
-  api_secret: process.env.CLOUDINARY_API_SECRET,
-  secure: true,
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME || "",
+  api_key: process.env.CLOUDINARY_API_KEY || "",
+  api_secret: process.env.CLOUDINARY_API_SECRET || "",
 });
 
-// Debug: Confirm config applied
-console.log("🌩 Cloudinary initialized with cloud name:", cloudinary.config().cloud_name);
+/**
+ * Utility: Upload buffer to Cloudinary
+ *
+ * @param {Buffer} buffer - Image/file buffer from multer memory storage
+ * @param {object} options
+ *    - folder: Cloudinary folder path
+ *
+ * Example return object from Cloudinary:
+ * {
+ *   asset_id, public_id, secure_url,
+ *   format, bytes, width, height
+ * }
+ */
 
-function uploadBufferToCloudinary(
-  buffer,
-  { folder = "", publicId = null, resource_type = "image" } = {}
-) {
-  console.log("⬆️ Starting Cloudinary Upload");
-  console.log(" - Folder:", folder);
-  console.log(" - Public ID (optional):", publicId);
-
+function uploadBufferToCloudinary(buffer, options = {}) {
   return new Promise((resolve, reject) => {
-    const opts = {};
-    if (folder) opts.folder = folder;
-    if (publicId) opts.public_id = publicId;
-    opts.resource_type = resource_type;
-
-    console.log("📦 Upload Options:", opts);
-
-    const uploadStream = cloudinary.uploader.upload_stream((err, result) => {
-      if (err) {
-        console.error("❌ Cloudinary Upload Error:", err);
-        return reject(err);
+    try {
+      if (!buffer) {
+        console.error("❌ uploadBufferToCloudinary: Missing buffer");
+        return reject(new Error("Missing file buffer"));
       }
 
-      console.log("✅ Cloudinary Upload Success:");
-      console.log(" - URL:", result.secure_url);
-      console.log(" - Public ID:", result.public_id);
+      console.log("🌥️ Uploading buffer to Cloudinary… folder=", options.folder);
 
-      resolve(result);
-    });
+      const uploadStream = cloudinary.uploader.upload_stream(
+        {
+          folder: options.folder || "kaurta/uploads",
+          resource_type: "image",
+        },
+        (error, result) => {
+          if (error) {
+            console.error("❌ Cloudinary upload error:", error);
+            return reject(error);
+          }
 
-    // Debug: Verify buffer size
-    console.log("📏 Uploading buffer size:", buffer.length, "bytes");
+          console.log("✅ Cloudinary upload success:", {
+            public_id: result.public_id,
+            url: result.secure_url,
+          });
 
-    streamifier.createReadStream(buffer).pipe(uploadStream);
+          resolve(result);
+        }
+      );
+
+      uploadStream.end(buffer);
+    } catch (err) {
+      console.error("❌ uploadBufferToCloudinary unexpected error:", err);
+      reject(err);
+    }
   });
 }
 
+/**
+ * Delete a Cloudinary asset by public_id
+ *
+ * @param {string} publicId
+ */
 async function destroyPublicId(publicId) {
   if (!publicId) {
-    console.log("⚠️ destroyPublicId called with null publicId");
-    return null;
+    console.warn("⚠️ destroyPublicId: publicId is empty");
+    return { result: "no_public_id" };
   }
 
-  console.log("🗑 Destroying Cloudinary public ID:", publicId);
-
   try {
-    const res = await cloudinary.uploader.destroy(publicId, {
-      resource_type: "image",
-    });
+    console.log("🗑️ Deleting Cloudinary asset public_id=", publicId);
 
-    console.log("🧹 Cloudinary destroy result:", res);
-    return res;
+    const result = await cloudinary.uploader.destroy(publicId);
+    console.log("🗑️ Cloudinary destroy result:", result);
+    return result;
   } catch (err) {
-    console.warn("❌ Cloudinary destroy error:", err?.message || err);
-    return null;
+    console.error("❌ destroyPublicId error for", publicId, err);
+    return { error: err.message };
   }
 }
 
 module.exports = {
   uploadBufferToCloudinary,
   destroyPublicId,
-  cloudinary, // export for debugging
 };

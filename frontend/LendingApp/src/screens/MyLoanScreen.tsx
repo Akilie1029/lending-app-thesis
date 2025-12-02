@@ -1,4 +1,5 @@
 // src/screens/MyLoanScreen.tsx
+
 import React, { useEffect, useState } from "react";
 import {
   View,
@@ -18,7 +19,7 @@ import MCIcon from "react-native-vector-icons/MaterialCommunityIcons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import axios from "axios";
 import { API_BASE } from "../config";
-import { useIsFocused, useNavigation } from "@react-navigation/native";
+import { useIsFocused } from "@react-navigation/native";
 
 const FILTERS = ["All", "Pending", "Active", "Paid"] as const;
 type Filter = (typeof FILTERS)[number];
@@ -48,14 +49,18 @@ export default function MyLoanScreen({ navigation }: any) {
         return;
       }
 
+      console.log("📡 Fetching borrower loans...");
+
       const res = await axios.get(`${API_BASE}/loans/my-loans`, {
         headers: { Authorization: `Bearer ${token}` },
       });
 
       const payload = Array.isArray(res.data) ? res.data : res.data?.loans ?? [];
+      console.log("📥 Borrower Loans:", payload);
+
       setLoans(payload);
     } catch (err) {
-      console.error("Loan fetch error:", err?.response?.data || err.message);
+      console.error("❌ Loan fetch error:", err?.response?.data || err.message);
       Alert.alert("Error", "Unable to fetch loans. Please try again.");
       setLoans([]);
     } finally {
@@ -97,61 +102,26 @@ export default function MyLoanScreen({ navigation }: any) {
 
   const renderLoan = ({ item }: { item: any }) => {
     const id = String(item.id);
-    const defaultCollapsedForPaid = (item.status || "").toLowerCase() === "paid";
-    const isExpanded = !!expandedMap[id] && !defaultCollapsedForPaid;
 
-    const principal = Number(item.principal ?? item.amount_requested ?? 0);
+    const isExpanded = !!expandedMap[id];
+    const principal = Number(item.principal ?? 0);
     const total = Number(item.total_payable ?? 0);
     const daily = Number(item.daily_payment ?? 0);
     const remaining = Number(item.remaining_balance ?? 0);
+
     const progress = computeProgress(item);
     const progressPct = Math.round(progress * 100);
-    const statusLabel = (item.status || "").toUpperCase();
 
-    if ((item.status || "").toLowerCase() === "paid") {
-      return (
-        <TouchableOpacity
-          activeOpacity={0.85}
-          onPress={() => toggleExpand(id)}
-          style={[styles.loanCard, { paddingVertical: 12 }]}
-        >
-          <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
-            <View>
-              <Text style={styles.loanTitleSmall}>₱ {principal.toLocaleString()}</Text>
-              <Text style={{ color: "#666", fontSize: 13 }}>
-                Paid • Total Paid: ₱ {Number(item.total_repaid ?? total).toLocaleString()}
-              </Text>
-            </View>
+    const status = (item.status || "").toLowerCase();
+    const statusLabel = status.toUpperCase();
 
-            <View style={{ alignItems: "flex-end" }}>
-              <Text style={{ fontWeight: "700" }}>
-                {item.last_payment_date
-                  ? new Date(item.last_payment_date).toLocaleDateString()
-                  : (item.disbursed_at ? new Date(item.disbursed_at).toLocaleDateString() : "—")}
-              </Text>
-              <Text style={{ color: "#169AF9", fontWeight: "700", marginTop: 6 }}>{statusLabel}</Text>
-            </View>
-          </View>
+    const isPending = status === "pending";
+    const isPaid = status === "completed" || status === "paid";
 
-          {isExpanded && (
-            <View style={{ marginTop: 12 }}>
-              <View style={styles.row}>
-                <Text style={styles.smallLabel}>Term</Text>
-                <Text style={styles.smallValue}>{item.days ?? "N/A"} days</Text>
-              </View>
-              <View style={styles.row}>
-                <Text style={styles.smallLabel}>Total Payable</Text>
-                <Text style={styles.smallValue}>₱ {Number(item.total_payable ?? 0).toLocaleString()}</Text>
-              </View>
-              <View style={styles.row}>
-                <Text style={styles.smallLabel}>Date Approved</Text>
-                <Text style={styles.smallValue}>{item.disbursed_at ? new Date(item.disbursed_at).toLocaleDateString() : "—"}</Text>
-              </View>
-            </View>
-          )}
-        </TouchableOpacity>
-      );
-    }
+    // ---------------------------
+    // PENDING LOANS — NO DETAILS VIEW
+    // ---------------------------
+    const detailsDisabled = isPending;
 
     return (
       <View style={styles.loanCard}>
@@ -168,13 +138,13 @@ export default function MyLoanScreen({ navigation }: any) {
 
           <View style={{ alignItems: "flex-end" }}>
             <Text style={styles.statusText}>{statusLabel}</Text>
-            <Icon name={expandedMap[id] ? "chevron-up" : "chevron-down"} size={22} color="#333" />
+            <Icon name={isExpanded ? "chevron-up" : "chevron-down"} size={22} color="#333" />
           </View>
         </TouchableOpacity>
 
-        {expandedMap[id] && (
+        {isExpanded && (
           <View style={styles.cardBody}>
-            {(item.status === "pending") && (
+            {isPending && (
               <View style={{ paddingVertical: 10 }}>
                 <Text style={{ color: "#666", fontSize: 14 }}>
                   Your loan application is still under review.
@@ -182,7 +152,7 @@ export default function MyLoanScreen({ navigation }: any) {
               </View>
             )}
 
-            {(item.status === "active" || item.status === "approved") && (
+            {(status === "active" || status === "approved") && (
               <>
                 <View style={styles.row}>
                   <Text style={styles.smallLabel}>Progress</Text>
@@ -206,7 +176,9 @@ export default function MyLoanScreen({ navigation }: any) {
 
                 <View style={styles.row}>
                   <Text style={styles.smallLabel}>Remaining</Text>
-                  <Text style={[styles.smallValue, { color: "#D62828" }]}>₱ {remaining.toLocaleString()}</Text>
+                  <Text style={[styles.smallValue, { color: "#D62828" }]}>
+                    ₱ {remaining.toLocaleString()}
+                  </Text>
                 </View>
 
                 <TouchableOpacity
@@ -218,10 +190,21 @@ export default function MyLoanScreen({ navigation }: any) {
               </>
             )}
 
+            {/* Footer */}
             <View style={styles.cardFooter}>
               <TouchableOpacity
-                style={styles.detailsBtn}
-                onPress={() => navigation.navigate("Loan Details", { loan: item })}
+                style={[
+                  styles.detailsBtn,
+                  detailsDisabled ? { opacity: 0.5 } : {},
+                ]}
+                disabled={detailsDisabled}
+                onPress={() => {
+                  if (detailsDisabled) {
+                    Alert.alert("Pending", "Loan details are available once the loan is approved.");
+                    return;
+                  }
+                  navigation.navigate("Loan Details", { loan: item });
+                }}
               >
                 <Text style={styles.detailsBtnText}>View Details</Text>
               </TouchableOpacity>
@@ -246,6 +229,7 @@ export default function MyLoanScreen({ navigation }: any) {
         <View style={{ width: 44 }} />
       </LinearGradient>
 
+      {/* Filter Row */}
       <View style={styles.filterRow}>
         {FILTERS.map((f) => (
           <TouchableOpacity
@@ -298,7 +282,6 @@ const styles = StyleSheet.create({
   loanCard: { backgroundColor: "#fff", marginHorizontal: 16, marginVertical: 8, borderRadius: 12, borderWidth: 2, borderColor: "#e8f4ff" },
   cardHeaderRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", padding: 14 },
   loanTitle: { fontSize: 18, fontWeight: "800" },
-  loanTitleSmall: { fontSize: 16, fontWeight: "800" },
   loanSubtitle: { fontSize: 12, color: "#666" },
   statusText: { fontSize: 12, fontWeight: "700", color: "#555", marginBottom: 4 },
 

@@ -22,7 +22,7 @@ export default function AdminLoanApprovalScreen({ navigation }: any) {
   const [loans, setLoans] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [processing, setProcessing] = useState<Record<number, boolean>>({});
+  const [processing, setProcessing] = useState<Record<number | string, boolean>>({});
 
   // ------------------------------
   // Load Pending Loans
@@ -30,11 +30,15 @@ export default function AdminLoanApprovalScreen({ navigation }: any) {
   const loadLoans = async () => {
     try {
       setLoading(true);
+      console.log("📡 Loading pending loans (/admin/pending)");
       const res = await api.get("/admin/pending");
-      setLoans(res.data || []);
-    } catch (err) {
+      // backend might return array at root or under .loans
+      const payload = Array.isArray(res.data) ? res.data : res.data?.loans ?? res.data ?? [];
+      setLoans(payload);
+    } catch (err: any) {
       console.log("❌ Pending loans error:", err?.response?.data || err);
       Alert.alert("Error", "Unable to load pending loan applications.");
+      setLoans([]);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -55,7 +59,7 @@ export default function AdminLoanApprovalScreen({ navigation }: any) {
   // ------------------------------
   // Reject Loan
   // ------------------------------
-  const rejectLoan = (loanId: number) => {
+  const rejectLoan = (loanId: number | string) => {
     Alert.alert(
       "Reject Loan",
       "Are you sure you want to reject this application?",
@@ -67,8 +71,10 @@ export default function AdminLoanApprovalScreen({ navigation }: any) {
           onPress: async () => {
             try {
               setProcessing((p) => ({ ...p, [loanId]: true }));
-              await api.post(`/admin/reject/${loanId}`);
-              setLoans((prev) => prev.filter((l) => l.id !== loanId));
+              console.log("➡️ Rejecting loan:", loanId);
+              // keep consistent pattern with other admin endpoints
+              await api.post(`/admin/loan/${loanId}/reject`);
+              setLoans((prev) => prev.filter((l) => String(l.id) !== String(loanId)));
               Alert.alert("Rejected", "Loan has been rejected.");
             } catch (err) {
               console.log("❌ Reject error:", err?.response?.data || err);
@@ -85,58 +91,57 @@ export default function AdminLoanApprovalScreen({ navigation }: any) {
   // ------------------------------
   // Render Loan Card
   // ------------------------------
-  const renderLoan = ({ item }: { item: any }) => (
-    <View style={styles.card}>
-      <View style={styles.cardHeader}>
-        <Text style={styles.name}>{item.full_name}</Text>
-        <Text style={styles.amount}>₱ {Number(item.principal).toLocaleString()}</Text>
+  const renderLoan = ({ item }: { item: any }) => {
+    const id = item.id ?? item.loan_id ?? "";
+    const principal = Number(item.principal ?? item.amount_requested ?? item.amount ?? 0);
+    const purpose = item.purpose ?? "";
+    const days = item.days ?? item.term ?? "-";
+    const createdAt = item.created_at ?? item.date_created ?? null;
+
+    return (
+      <View style={styles.card}>
+        <View style={styles.cardHeader}>
+          <Text style={styles.name}>{item.full_name ?? item.borrower_name ?? "Unknown"}</Text>
+          <Text style={styles.amount}>₱ {principal.toLocaleString()}</Text>
+        </View>
+
+        <Text style={styles.purpose}>{purpose}</Text>
+
+        <View style={styles.metaRow}>
+          <Text style={styles.metaLabel}>Term</Text>
+          <Text style={styles.metaValue}>{days} days</Text>
+        </View>
+
+        <View style={styles.metaRow}>
+          <Text style={styles.metaLabel}>Applied</Text>
+          <Text style={styles.metaValue}>
+            {createdAt ? format(new Date(createdAt), "MMM d, yyyy") : "—"}
+          </Text>
+        </View>
+
+        <View style={styles.actions}>
+          <TouchableOpacity
+            style={[styles.actionBtn, styles.reviewBtn]}
+            onPress={() => {
+              console.log("Navigating to review for loan:", id);
+              // keep navigation target unchanged
+              navigation.navigate("AdminLoanReviewScreen", { loanId: id });
+            }}
+          >
+            <Text style={styles.actionText}>Review</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.actionBtn, styles.rejectBtn]}
+            onPress={() => rejectLoan(id)}
+            disabled={!!processing[id]}
+          >
+            {processing[id] ? <ActivityIndicator color="#fff" /> : <Text style={styles.actionText}>Reject</Text>}
+          </TouchableOpacity>
+        </View>
       </View>
-
-      <Text style={styles.purpose}>{item.purpose}</Text>
-
-      <View style={styles.metaRow}>
-        <Text style={styles.metaLabel}>Term</Text>
-        <Text style={styles.metaValue}>{item.days} days</Text>
-      </View>
-
-      <View style={styles.metaRow}>
-        <Text style={styles.metaLabel}>Applied</Text>
-        <Text style={styles.metaValue}>
-          {item.created_at
-            ? format(new Date(item.created_at), "MMM d, yyyy")
-            : "—"}
-        </Text>
-      </View>
-
-      <View style={styles.actions}>
-        <TouchableOpacity
-          style={[styles.actionBtn, styles.reviewBtn]}
-          onPress={() => {
-            console.log("Navigating to review for loan:", item.id);
-
-            navigation.navigate(
-              "AdminLoanReviewScreen", // ← Make sure this exists in navigator!
-              { loanId: item.id }
-            );
-          }}
-        >
-          <Text style={styles.actionText}>Review</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[styles.actionBtn, styles.rejectBtn]}
-          onPress={() => rejectLoan(item.id)}
-          disabled={processing[item.id]}
-        >
-          {processing[item.id] ? (
-            <ActivityIndicator color="#fff" />
-          ) : (
-            <Text style={styles.actionText}>Reject</Text>
-          )}
-        </TouchableOpacity>
-      </View>
-    </View>
-  );
+    );
+  };
 
   // ------------------------------
   // Loading State
@@ -155,7 +160,7 @@ export default function AdminLoanApprovalScreen({ navigation }: any) {
   // ------------------------------
   // Empty State
   // ------------------------------
-  if (loans.length === 0) {
+  if (!loading && loans.length === 0) {
     return (
       <View style={styles.container}>
         <SmallHeader title="Loan Approval" />
@@ -176,11 +181,9 @@ export default function AdminLoanApprovalScreen({ navigation }: any) {
       <FlatList
         data={loans}
         renderItem={renderLoan}
-        keyExtractor={(item) => String(item.id)}
+        keyExtractor={(item) => String(item.id ?? item.loan_id ?? `${Math.random()}`)}
         contentContainerStyle={styles.listContainer}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-        }
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
       />
     </View>
   );
@@ -299,4 +302,3 @@ const styles = StyleSheet.create({
   },
 });
 
-export default AdminLoanApprovalScreen;

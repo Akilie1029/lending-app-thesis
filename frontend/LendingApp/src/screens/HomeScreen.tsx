@@ -29,6 +29,8 @@ const HomeScreen = ({ navigation }: HomeScreenProps) => {
 
       const headers = { Authorization: `Bearer ${token}` };
 
+      console.log("📤 HOME FETCH — Calling 4 endpoints...");
+
       const [userRes, txRes, activeLoanRes, latestLoanRes] = await Promise.all([
         axios.get(`${API_BASE}/auth/me`, { headers }),
         axios.get(`${API_BASE}/transactions/my`, { headers }),
@@ -36,13 +38,36 @@ const HomeScreen = ({ navigation }: HomeScreenProps) => {
         axios.get(`${API_BASE}/loans/my-latest`, { headers }),
       ]);
 
+      console.log("📥 HOME FETCH RESPONSES →", {
+        user: userRes.data,
+        transactions: txRes.data,
+        activeLoan: activeLoanRes.data,
+        latestLoan: latestLoanRes.data,
+      });
+
+      // USER
       setUser(userRes.data);
+
+      // TRANSACTIONS
       setTransactions(txRes.data || []);
 
-      setActiveLoan(activeLoanRes.data?.id ? activeLoanRes.data : null);
-      setLatestLoan(latestLoanRes.data?.latestLoan || null);
+      // ACTIVE LOAN NORMALIZATION
+      const active =
+        activeLoanRes.data?.loan ||
+        activeLoanRes.data?.activeLoan ||
+        activeLoanRes.data;
+
+      setActiveLoan(active?.id ? active : null);
+
+      // LATEST LOAN (pending OR recently created)
+      const latest =
+        latestLoanRes.data?.latestLoan ||
+        latestLoanRes.data?.loan ||
+        latestLoanRes.data;
+
+      setLatestLoan(latest?.id ? latest : null);
     } catch (e) {
-      console.log("Dashboard fetch error:", e);
+      console.log("❌ Dashboard fetch error:", e);
     } finally {
       setLoading(false);
     }
@@ -70,10 +95,16 @@ const HomeScreen = ({ navigation }: HomeScreenProps) => {
   const hasPendingLoan = latestLoan && latestLoan.status === "pending";
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 40 }}>
+    <ScrollView
+      style={styles.container}
+      contentContainerStyle={{ paddingBottom: 40 }}
+    >
       <LinearGradient colors={["#169AF9", "#37AAF2"]} style={styles.header}>
         <View style={styles.headerTopRow}>
-          <TouchableOpacity onPress={() => navigation.openDrawer()} style={styles.menuContainer}>
+          <TouchableOpacity
+            onPress={() => navigation.openDrawer()}
+            style={styles.menuContainer}
+          >
             <Text style={styles.menuIcon}>☰</Text>
             <Text style={styles.headerSubtitle}>Welcome Back</Text>
             <Text style={styles.headerName}>{user?.full_name}</Text>
@@ -87,7 +118,8 @@ const HomeScreen = ({ navigation }: HomeScreenProps) => {
         {hasActiveLoan ? (
           <>
             <Text style={styles.dailyPaymentText}>
-              Daily Payment: ₱ {Number(activeLoan.daily_payment ?? 0).toLocaleString()}
+              Daily Payment: ₱{" "}
+              {Number(activeLoan.daily_payment ?? 0).toLocaleString()}
             </Text>
 
             <Text style={styles.dueDateText}>
@@ -99,7 +131,9 @@ const HomeScreen = ({ navigation }: HomeScreenProps) => {
 
             <TouchableOpacity
               style={[styles.primaryButton, { width: "100%" }]}
-              onPress={() => navigation.navigate("RepayLoan", { loan: activeLoan })}
+              onPress={() =>
+                navigation.navigate("RepayLoan", { loan: activeLoan })
+              }
             >
               <Text style={styles.primaryButtonText}>Make a Payment</Text>
             </TouchableOpacity>
@@ -127,12 +161,14 @@ const HomeScreen = ({ navigation }: HomeScreenProps) => {
         )}
       </View>
 
-      {/* Pending/Active Loan */}
+      {/* Pending Loan Card */}
       {hasPendingLoan && !hasActiveLoan && (
         <View style={styles.loanCard}>
           <View style={styles.loanRow}>
             <View>
-              <Text style={styles.loanAmount}>₱ {Number(latestLoan.principal).toLocaleString()}</Text>
+              <Text style={styles.loanAmount}>
+                ₱ {Number(latestLoan.principal).toLocaleString()}
+              </Text>
               <Text style={styles.loanAmountLabel}>Pending Approval</Text>
             </View>
 
@@ -146,18 +182,23 @@ const HomeScreen = ({ navigation }: HomeScreenProps) => {
 
           <TouchableOpacity
             style={[styles.secondaryButton, { width: "100%", marginTop: 12 }]}
-            onPress={() => navigation.navigate("Loan Details", { loan: latestLoan })}
+            onPress={() =>
+              navigation.navigate("Loan Details", { loan: latestLoan })
+            }
           >
             <Text style={styles.secondaryButtonText}>View Details</Text>
           </TouchableOpacity>
         </View>
       )}
 
+      {/* Active Loan Card */}
       {hasActiveLoan && (
         <View style={styles.loanCard}>
           <View style={styles.loanRow}>
             <View>
-              <Text style={styles.loanAmount}>₱ {Number(activeLoan.principal).toLocaleString()}</Text>
+              <Text style={styles.loanAmount}>
+                ₱ {Number(activeLoan.principal).toLocaleString()}
+              </Text>
               <Text style={styles.loanAmountLabel}>Approved Loan Amount</Text>
             </View>
 
@@ -173,7 +214,9 @@ const HomeScreen = ({ navigation }: HomeScreenProps) => {
 
           <TouchableOpacity
             style={[styles.secondaryButton, { width: "100%", marginTop: 12 }]}
-            onPress={() => navigation.navigate("Loan Details", { loan: activeLoan })}
+            onPress={() =>
+              navigation.navigate("Loan Details", { loan: activeLoan })
+            }
           >
             <Text style={styles.secondaryButtonText}>View Details</Text>
           </TouchableOpacity>
@@ -187,7 +230,9 @@ const HomeScreen = ({ navigation }: HomeScreenProps) => {
 
       <View style={styles.transactionsContainer}>
         {transactions.length === 0 ? (
-          <Text style={{ textAlign: "center", color: "#999", padding: 10 }}>
+          <Text
+            style={{ textAlign: "center", color: "#999", padding: 10 }}
+          >
             No recent transactions found
           </Text>
         ) : (

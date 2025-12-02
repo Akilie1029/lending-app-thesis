@@ -1,4 +1,5 @@
 // src/screens/SignupScreen.tsx
+
 import React, { useState } from "react";
 import {
   View,
@@ -25,14 +26,12 @@ const moderateScale = (size: number, factor = 0.5) =>
   size + (scale(size) - size) * factor;
 
 const SignupScreen = ({ navigation }: LoginScreenProps) => {
-  // local state for form inputs
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [loading, setLoading] = useState(false);
 
-  // handle signup
   const handleSignup = async () => {
     if (!fullName || !email || !password || !confirmPassword) {
       Alert.alert("Error", "Please fill in all fields.");
@@ -47,28 +46,47 @@ const SignupScreen = ({ navigation }: LoginScreenProps) => {
     try {
       setLoading(true);
 
+      console.log("📤 SIGNUP REQUEST →", {
+        full_name: fullName,
+        email,
+        password,
+      });
+
       const res = await axios.post(`${API_BASE}/auth/register`, {
         full_name: fullName,
         email,
         password,
       });
 
+      console.log("📥 SIGNUP RESPONSE →", res.data);
+
       const token = res.data?.token;
+
       if (token) {
         await AsyncStorage.setItem("userToken", token);
       }
 
+      // Ensure role is set properly
+      await AsyncStorage.setItem("userRole", "user");
+
       Alert.alert("Success", "Account created successfully!", [
         {
           text: "OK",
-          onPress: () => navigation.reset({ index: 0, routes: [{ name: "Drawer" as any }] }),
+          onPress: () =>
+            navigation.reset({
+              index: 0,
+              routes: [{ name: "Drawer" }],
+            }),
         },
       ]);
     } catch (error: any) {
-      console.log("Signup error:", error?.response?.data || error.message);
+      console.log("❌ Signup error:", error?.response?.data || error.message);
+
       Alert.alert(
         "Signup Failed",
-        error?.response?.data?.error || error?.response?.data?.message || "Something went wrong"
+        error?.response?.data?.error ||
+          error?.response?.data?.message ||
+          "Something went wrong"
       );
     } finally {
       setLoading(false);
@@ -86,7 +104,10 @@ const SignupScreen = ({ navigation }: LoginScreenProps) => {
         {/* Top header with circular logo */}
         <View style={styles.blueHeader}>
           <View style={styles.logoWrapper}>
-            <Image source={require("../../assets/logo.png")} style={styles.logo} />
+            <Image
+              source={require("../../assets/logo.png")}
+              style={styles.logo}
+            />
           </View>
         </View>
 
@@ -131,13 +152,22 @@ const SignupScreen = ({ navigation }: LoginScreenProps) => {
           />
 
           {/* Signup Button */}
-          <TouchableOpacity style={styles.button} onPress={handleSignup} disabled={loading}>
-            <Text style={styles.buttonText}>{loading ? "Creating..." : "Sign Up"}</Text>
+          <TouchableOpacity
+            style={styles.button}
+            onPress={handleSignup}
+            disabled={loading}
+          >
+            <Text style={styles.buttonText}>
+              {loading ? "Creating..." : "Sign Up"}
+            </Text>
           </TouchableOpacity>
 
           <Text style={styles.footerText}>Already have an account?</Text>
 
-          <TouchableOpacity style={styles.loginButton} onPress={() => navigation.navigate("Login" as any)}>
+          <TouchableOpacity
+            style={styles.loginButton}
+            onPress={() => navigation.navigate("Login" as any)}
+          >
             <Text style={styles.loginButtonText}>Login</Text>
           </TouchableOpacity>
         </View>

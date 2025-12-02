@@ -1,4 +1,4 @@
-// src/screens/admin/AdminLoanDocumentsScreen.tsx
+// src/screens/AdminLoanDocumentsScreen.tsx
 import React, { useEffect, useState, useCallback } from "react";
 import {
   View,
@@ -11,6 +11,7 @@ import {
   Modal,
   SafeAreaView,
   Dimensions,
+  Alert,
 } from "react-native";
 import { useFocusEffect, useRoute, useNavigation } from "@react-navigation/native";
 import Icon from "react-native-vector-icons/Ionicons";
@@ -21,34 +22,52 @@ const { width: SCREEN_W } = Dimensions.get("window");
 type Doc = {
   id: number | string;
   loan_id: number | string;
-  user_id?: number | string;
-  doc_type?: string;
+  doc_type: string;
   url: string;
-  public_id?: string;
-  file_format?: string;
-  file_size?: number;
   uploaded_at?: string;
-  user_full_name?: string;
-  user_email?: string;
 };
 
 export default function AdminLoanDocumentsScreen() {
   const route: any = useRoute();
   const navigation: any = useNavigation();
-  const loanId = route.params?.loanId;
 
+  const loanId = route.params?.loanId;
   const [loading, setLoading] = useState(true);
   const [docs, setDocs] = useState<Doc[]>([]);
   const [selected, setSelected] = useState<Doc | null>(null);
 
   const loadDocs = useCallback(async () => {
-    if (!loanId) return;
+    if (!loanId) {
+      Alert.alert("Error", "Missing loan ID.");
+      return;
+    }
+
     try {
       setLoading(true);
+
+      console.log("📡 Fetching documents for loanId:", loanId);
+
       const res = await api.get(`/admin/loan/${loanId}/documents`);
-      setDocs(res.data.documents || []);
+      console.log("📥 Documents Response:", res.data);
+
+      // Normalize into array of { doc_type, url }
+      const loan = res.data?.loan || {};
+      const list: Doc[] = [];
+
+      if (loan.gov_id_uri) {
+        list.push({ id: "gov_id", loan_id: loanId, doc_type: "Government ID", url: loan.gov_id_uri });
+      }
+      if (loan.selfie_id_uri) {
+        list.push({ id: "selfie_id", loan_id: loanId, doc_type: "Selfie with ID", url: loan.selfie_id_uri });
+      }
+      if (loan.proof_uri) {
+        list.push({ id: "proof_income", loan_id: loanId, doc_type: "Proof of Income", url: loan.proof_uri });
+      }
+
+      setDocs(list);
     } catch (err) {
-      console.error("Load loan documents error:", err?.response?.data || err);
+      console.error("❌ Load loan documents error:", err?.response?.data || err);
+      Alert.alert("Error", "Unable to load documents.");
     } finally {
       setLoading(false);
     }
@@ -60,34 +79,22 @@ export default function AdminLoanDocumentsScreen() {
     }, [loadDocs])
   );
 
-  const renderItem = ({ item }: { item: Doc }) => {
-    const label = item.doc_type || "Document";
-    const thumb = item.url;
-
-    return (
-      <TouchableOpacity
-        style={styles.card}
-        onPress={() => setSelected(item)}
-      >
-        <Image
-          source={{ uri: thumb }}
-          style={styles.thumbnail}
-          resizeMode="cover"
-        />
-        <View style={{ flex: 1, marginLeft: 12 }}>
-          <Text style={styles.title}>{label}</Text>
-          <Text style={styles.meta}>
-            {item.user_full_name ? `${item.user_full_name}` : ""}
-            {item.user_email ? ` • ${item.user_email}` : ""}
-          </Text>
-          <Text style={styles.metaSmall}>
-            {item.uploaded_at ? new Date(item.uploaded_at).toLocaleString() : ""}
-          </Text>
-        </View>
-        <Icon name="chevron-forward" size={20} color="#666" />
-      </TouchableOpacity>
-    );
-  };
+  const renderItem = ({ item }: { item: Doc }) => (
+    <TouchableOpacity style={styles.card} onPress={() => setSelected(item)}>
+      <Image
+        source={{ uri: item.url }}
+        style={styles.thumbnail}
+        resizeMode="cover"
+      />
+      <View style={{ flex: 1, marginLeft: 12 }}>
+        <Text style={styles.title}>{item.doc_type}</Text>
+        <Text style={styles.metaSmall}>
+          {item.uploaded_at ? new Date(item.uploaded_at).toLocaleString() : ""}
+        </Text>
+      </View>
+      <Icon name="chevron-forward" size={20} color="#666" />
+    </TouchableOpacity>
+  );
 
   return (
     <SafeAreaView style={styles.container}>
@@ -118,17 +125,19 @@ export default function AdminLoanDocumentsScreen() {
         />
       )}
 
-      {/* Fullscreen preview modal */}
+      {/* Fullscreen Preview Modal */}
       <Modal visible={!!selected} transparent animationType="slide">
         <SafeAreaView style={styles.previewContainer}>
+          {/* Close button */}
           <View style={styles.previewHeader}>
             <TouchableOpacity onPress={() => setSelected(null)} style={{ padding: 8 }}>
               <Icon name="close" size={28} color="#fff" />
             </TouchableOpacity>
-            <Text style={styles.previewTitle}>{selected?.doc_type || "Document"}</Text>
+            <Text style={styles.previewTitle}>{selected?.doc_type || ""}</Text>
             <View style={{ width: 40 }} />
           </View>
 
+          {/* Image */}
           <View style={styles.previewBody}>
             {selected ? (
               <Image
@@ -168,9 +177,14 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#eef2f6",
   },
-  thumbnail: { width: 84, height: 84, borderRadius: 8, backgroundColor: "#eef3f8" },
+
+  thumbnail: {
+    width: 84,
+    height: 84,
+    borderRadius: 8,
+    backgroundColor: "#eef3f8",
+  },
   title: { fontWeight: "800", fontSize: 15, color: "#111" },
-  meta: { color: "#666", marginTop: 6 },
   metaSmall: { color: "#999", fontSize: 12, marginTop: 6 },
 
   previewContainer: { flex: 1, backgroundColor: "#000" },

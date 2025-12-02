@@ -1,4 +1,5 @@
 // src/screens/AdminAllLoansScreen.tsx
+
 import React, { useCallback, useEffect, useState } from "react";
 import {
   View,
@@ -34,7 +35,6 @@ export default function AdminAllLoansScreen({ navigation }: any) {
   const [refreshing, setRefreshing] = useState(false);
   const [filterVisible, setFilterVisible] = useState(false);
 
-  // filters state passed to api
   const [filterState, setFilterState] = useState<any>({
     from: null,
     to: null,
@@ -45,6 +45,7 @@ export default function AdminAllLoansScreen({ navigation }: any) {
   const loadLoans = async (p = 1, replace = true) => {
     try {
       setLoading(true);
+
       const params: any = {
         q: search || undefined,
         page: p,
@@ -55,12 +56,15 @@ export default function AdminAllLoansScreen({ navigation }: any) {
       if (filterState.from) params.from = filterState.from;
       if (filterState.to) params.to = filterState.to;
       if (filterState.statuses && filterState.statuses.length > 0) {
-        // backend expects comma-separated statuses or repeatable query param
         params.status = filterState.statuses.join(",");
       }
 
+      console.log("📡 AdminAllLoans: Fetching loans with params →", params);
+
       const res = await api.get("/admin/all-loans", { params });
-      // Expected shape: { loans: [], meta: { total, page, limit } }
+
+      console.log("📥 AdminAllLoans Response:", res.data);
+
       setTotal(res.data.meta?.total ?? 0);
 
       if (replace) setLoans(res.data.loans || []);
@@ -68,7 +72,7 @@ export default function AdminAllLoansScreen({ navigation }: any) {
 
       setPage(p);
     } catch (err) {
-      console.error("Load loans error:", err?.response?.data || err);
+      console.error("❌ Load loans error:", err?.response?.data || err);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -99,7 +103,6 @@ export default function AdminAllLoansScreen({ navigation }: any) {
       ...filterState,
       ...f,
     });
-    // loadLoans(1, true) triggered by useFocusEffect dependency
   };
 
   const clearSearch = () => {
@@ -107,22 +110,47 @@ export default function AdminAllLoansScreen({ navigation }: any) {
   };
 
   const renderLoan = ({ item }: { item: LoanItem }) => {
-    const statusOpt = STATUS_OPTIONS.find((s) => s.key === (item.status || "").toLowerCase());
+    const statusOpt = STATUS_OPTIONS.find(
+      (s) => s.key === (item.status || "").toLowerCase()
+    );
     const statusColor = statusOpt ? statusOpt.color : "#777";
+
     return (
-      <TouchableOpacity style={styles.card} onPress={() => navigation.navigate("AdminLoanDetails", { loanId: item.id })}>
+      <TouchableOpacity
+        style={styles.card}
+        onPress={() => {
+          console.log("➡️ Navigating to AdminLoanReviewScreen with loanId:", item.id);
+          navigation.navigate("AdminLoanReviewScreen", { loanId: item.id });
+        }}
+      >
         <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
           <View style={{ flex: 1 }}>
             <Text style={styles.name}>{item.user_full_name || "Unknown"}</Text>
             <Text style={styles.meta}>Loan ID: {item.id}</Text>
             <Text style={styles.metaSmall}>
-              Borrower ID: {item.user_id ?? "-"} • {item.created_at ? new Date(item.created_at).toLocaleDateString() : "-"}
+              Borrower ID: {item.user_id ?? "-"} •{" "}
+              {item.created_at
+                ? new Date(item.created_at).toLocaleDateString()
+                : "-"}
             </Text>
           </View>
+
           <View style={{ alignItems: "flex-end" }}>
-            <Text style={styles.amount}>₱{(item.amount || 0).toFixed(2)}</Text>
-            <View style={[styles.statusBadge, { backgroundColor: `${statusColor}22`, borderColor: `${statusColor}44` }]}>
-              <Text style={[styles.statusText, { color: statusColor }]}>{(item.status || "").toUpperCase()}</Text>
+            <Text style={styles.amount}>
+              ₱{(item.amount || 0).toFixed(2)}
+            </Text>
+            <View
+              style={[
+                styles.statusBadge,
+                {
+                  backgroundColor: `${statusColor}22`,
+                  borderColor: `${statusColor}44`,
+                },
+              ]}
+            >
+              <Text style={[styles.statusText, { color: statusColor }]}>
+                {(item.status || "").toUpperCase()}
+              </Text>
             </View>
           </View>
         </View>
@@ -134,17 +162,25 @@ export default function AdminAllLoansScreen({ navigation }: any) {
     <View style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.openDrawer()} style={{ paddingRight: 12 }}>
+        <TouchableOpacity
+          onPress={() => navigation.openDrawer()}
+          style={{ paddingRight: 12 }}
+        >
           <Icon name="menu" size={24} color="#fff" />
         </TouchableOpacity>
 
         <Text style={styles.headerTitle}>All Loans</Text>
       </View>
 
-      {/* Search + Filter Row */}
+      {/* Search + Filter */}
       <View style={styles.searchRow}>
         <View style={styles.searchWrap}>
-          <Icon name="search-outline" size={20} color="#666" style={{ marginLeft: 12 }} />
+          <Icon
+            name="search-outline"
+            size={20}
+            color="#666"
+            style={{ marginLeft: 12 }}
+          />
           <TextInput
             style={styles.searchInput}
             placeholder="Search borrower or loan ID"
@@ -167,7 +203,9 @@ export default function AdminAllLoansScreen({ navigation }: any) {
 
       {/* Totals */}
       <View style={styles.totalsRow}>
-        <Text style={styles.totalsText}>Showing {loans.length} of {total} loans</Text>
+        <Text style={styles.totalsText}>
+          Showing {loans.length} of {total} loans
+        </Text>
       </View>
 
       {/* List */}
@@ -182,7 +220,13 @@ export default function AdminAllLoansScreen({ navigation }: any) {
           keyExtractor={(i) => String(i.id)}
           onEndReached={loadMore}
           onEndReachedThreshold={0.6}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#169AF9" />}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              tintColor="#169AF9"
+            />
+          }
           ListEmptyComponent={() => (
             <View style={{ padding: 40, alignItems: "center" }}>
               <Text>No loans found.</Text>
@@ -192,7 +236,7 @@ export default function AdminAllLoansScreen({ navigation }: any) {
         />
       )}
 
-      {/* Filter sheet */}
+      {/* Filter Sheet */}
       <LoanFilterSheet
         visible={filterVisible}
         initial={{
@@ -220,7 +264,11 @@ const styles = StyleSheet.create({
   },
   headerTitle: { color: "#fff", fontSize: 18, fontWeight: "800" },
 
-  searchRow: { flexDirection: "row", padding: 12, alignItems: "center" },
+  searchRow: {
+    flexDirection: "row",
+    padding: 12,
+    alignItems: "center",
+  },
   searchWrap: {
     flex: 1,
     backgroundColor: "#fff",
@@ -238,6 +286,7 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: "#333",
   },
+
   filterBtn: {
     width: 46,
     height: 46,
@@ -250,7 +299,6 @@ const styles = StyleSheet.create({
   },
 
   totalsRow: { paddingHorizontal: 12, paddingBottom: 6 },
-
   totalsText: { color: "#444", fontWeight: "700" },
 
   card: {

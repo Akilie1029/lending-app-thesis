@@ -1,55 +1,83 @@
 // authMiddleware.js
-// Verifies Bearer JWT in Authorization header and attaches normalized user to req.user
-
 const jwt = require("jsonwebtoken");
 
-// Use environment variable; fallback for local dev only.
-const JWT_SECRET = process.env.JWT_SECRET || "TEMP_DEV_SECRET";
+const JWT_SECRET = process.env.JWT_SECRET || "LOCAL_DEV_SECRET_ONLY";
 
-module.exports = function (req, res, next) {
+/**
+ * authMiddleware
+ *
+ * - Extracts JWT from Authorization header ("Bearer <token>") or ?token= query param.
+ * - Verifies token using JWT_SECRET.
+ * - Supports token payload shapes:
+ *     { user: { id, role, ... } }   (preferred)
+ *     { id, role, ... }             (legacy)
+ * - Attaches req.user = { id, role, ... } with role normalized to lowercase for easier checks.
+ * - On failure: responds with 401 Unauthorized and helpful debug message.
+ *
+ * Usage:
+ *   app.use("/api/...", authMiddleware);
+ */
+function authMiddleware(req, res, next) {
   try {
-    const authHeader = req.headers["authorization"] || req.headers["Authorization"];
-    if (!authHeader) {
-      return res.status(401).json({ error: "No token provided" });
+    // Extract token from Authorization header or query param or body (convenience)
+    const authHeader = req.headers?.authorization || req.headers?.Authorization || "";
+    let token = null;
+
+    if (authHeader && typeof authHeader === "string") {
+      const parts = authHeader.split(" ");
+      if (parts.length === 2 && /^Bearer$/i.test(parts[0])) {
+        token = parts[1];
+      } else if (parts.length === 1) {
+        // in case header is just token
+        token = parts[0];
+      }
     }
 
-    // Expect "Bearer <token>"
-    const parts = authHeader.split(" ");
-    if (parts.length !== 2 || parts[0] !== "Bearer") {
-      return res.status(401).json({ error: "Malformed authorization header" });
-    }
+    // fallback to query param or body
+    if (!token) token = req.query?.token || req.body?.token || null;
 
-    const token = parts[1];
     if (!token) {
-      return res.status(401).json({ error: "Empty token" });
+      console.warn("🔒 authMiddleware: missing token");
+      return res.status(401).json({ error: "Unauthorized", message: "Missing token" });
     }
 
-    let decoded;
+    let payload;
     try {
-      decoded = jwt.verify(token, JWT_SECRET);
+      payload = jwt.verify(token, JWT_SECRET);
     } catch (err) {
-      // token expired, invalid signature, etc.
-      return res.status(401).json({ error: "Invalid or expired token" });
+      console.warn("🔒 authMiddleware: token verification failed:", err.message);
+      return res.status(401).json({ error: "Unauthorized", message: "Invalid or expired token" });
     }
 
-    // Normalize payload: many of your routes expect req.user.id and req.user.role
-    const userPayload = decoded.user || decoded;
+    // Accept either payload.user or the payload itself
+    const userPayload = payload && payload.user ? payload.user : payload;
+
     if (!userPayload || !userPayload.id) {
-      return res.status(401).json({ error: "Invalid token payload" });
+      console.warn("🔒 authMiddleware: token payload missing user id:", payload);
+      return res.status(401).json({ error: "Unauthorized", message: "Invalid token payload" });
     }
 
-    // Attach minimal user object to request
+    // Normalize role and expose useful user object
+    const roleRaw = userPayload.role || userPayload.role || "borrower";
+    const roleNormalized = (typeof roleRaw === "string") ? roleRaw.toLowerCase() : "borrower";
+
     req.user = {
       id: userPayload.id,
-      role: (userPayload.role || "BORROWER").toString().toUpperCase(),
-      // include any other fields you trust from token (email etc.) if needed
+      role: roleNormalized,
+      // include any other fields from token if present (email, full_name, etc.)
       ...(userPayload.email ? { email: userPayload.email } : {}),
       ...(userPayload.full_name ? { full_name: userPayload.full_name } : {}),
     };
 
+    // Debug log
+    // Avoid logging entire token payload in production — only minimal info
+    console.log(`🔐 authMiddleware: user authenticated id=${req.user.id} role=${req.user.role}`);
+
     return next();
   } catch (err) {
-    console.error("Auth middleware unexpected error:", err);
-    return res.status(500).json({ error: "Auth middleware error" });
+    console.error("❌ authMiddleware unexpected error:", err);
+    return res.status(500).json({ error: "Server error", details: err.message });
   }
-};
+}
+
+module.exports = authMiddleware;

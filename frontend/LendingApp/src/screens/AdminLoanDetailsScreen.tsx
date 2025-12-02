@@ -17,29 +17,35 @@ export default function AdminLoanDetailsScreen({ route, navigation }: any) {
   const { loanId } = route.params;
 
   const [loan, setLoan] = useState<any>(null);
+  const [schedule, setSchedule] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-
-  const loadLoan = async () => {
-    try {
-      setLoading(true);
-      const res = await api.get(`/admin/loan/${loanId}/details`);
-      setLoan(res.data);
-    } catch (err: any) {
-      console.error("Loan details load error:", err);
-      Alert.alert("Error", err?.message || "Unable to load loan details.");
-    } finally {
-      setLoading(false);
-    }
-  };
 
   useEffect(() => {
     loadLoan();
   }, []);
 
+  const loadLoan = async () => {
+    try {
+      setLoading(true);
+      console.log("📡 Fetching loan details for loanId:", loanId);
+
+      const res = await api.get(`/admin/loan/${loanId}/details`);
+      console.log("📥 Loan Details Response:", res.data);
+
+      setLoan(res.data.loan || {});
+      setSchedule(res.data.schedule || []);
+    } catch (err: any) {
+      console.error("❌ Loan details load error:", err?.response?.data || err);
+      Alert.alert("Error", "Unable to load loan details.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const renderRow = (label: string, value: any) => (
     <View style={styles.row}>
       <Text style={styles.rowLabel}>{label}</Text>
-      <Text style={styles.rowValue}>{String(value || "-")}</Text>
+      <Text style={styles.rowValue}>{String(value ?? "-")}</Text>
     </View>
   );
 
@@ -66,7 +72,7 @@ export default function AdminLoanDetailsScreen({ route, navigation }: any) {
       </View>
 
       <ScrollView contentContainerStyle={{ padding: 16 }}>
-        {/* LOAN CARD */}
+        {/* BORROWER CARD */}
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Borrower Info</Text>
 
@@ -74,19 +80,26 @@ export default function AdminLoanDetailsScreen({ route, navigation }: any) {
           {renderRow("Email", loan.email)}
         </View>
 
+        {/* LOAN INFO */}
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Loan Information</Text>
 
           {renderRow("Loan ID", loan.id)}
-          {renderRow("Amount Requested", `₱${loan.amount_requested}`)}
-          {renderRow("Disbursed Amount", `₱${loan.disbursed_amount || 0}`)}
-          {renderRow("Status", loan.status)}
+          {renderRow("Principal", `₱${Number(loan.principal).toLocaleString()}`)}
+          {renderRow(
+            "Daily Payment",
+            `₱${Number(loan.daily_payment ?? 0).toLocaleString()}`
+          )}
           {renderRow("Purpose", loan.purpose)}
           {renderRow("Days", loan.days)}
-          {renderRow("Created At", new Date(loan.created_at).toLocaleString())}
+          {renderRow("Status", loan.status)}
+          {renderRow(
+            "Created",
+            loan.created_at ? new Date(loan.created_at).toLocaleString() : "-"
+          )}
         </View>
 
-        {/* ⭐ NEW — VIEW DOCUMENTS BUTTON */}
+        {/* DOCUMENTS BUTTON */}
         <TouchableOpacity
           style={styles.documentsBtn}
           onPress={() =>
@@ -98,6 +111,39 @@ export default function AdminLoanDetailsScreen({ route, navigation }: any) {
           <Icon name="document-text-outline" size={20} color="#fff" />
           <Text style={styles.documentsBtnText}>View Submitted Documents</Text>
         </TouchableOpacity>
+
+        {/* REPAYMENT SCHEDULE */}
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Repayment Schedule</Text>
+
+          {schedule.length === 0 ? (
+            <Text style={{ color: "#777", marginTop: 10 }}>
+              No schedule available.
+            </Text>
+          ) : (
+            schedule.map((item, index) => (
+              <View key={index} style={styles.scheduleRow}>
+                <Text style={styles.scheduleLabel}>
+                  Day {item.day_number ?? index + 1}
+                </Text>
+
+                <View style={{ alignItems: "flex-end" }}>
+                  <Text style={styles.scheduleAmount}>
+                    ₱ {Number(item.expected_amount ?? 0).toLocaleString()}
+                  </Text>
+                  <Text
+                    style={[
+                      styles.scheduleStatus,
+                      item.status === "paid" ? styles.green : styles.orange,
+                    ]}
+                  >
+                    {item.status?.toUpperCase() ?? "PENDING"}
+                  </Text>
+                </View>
+              </View>
+            ))
+          )}
+        </View>
 
         <View style={{ height: 40 }} />
       </ScrollView>
@@ -149,6 +195,22 @@ const styles = StyleSheet.create({
     marginTop: 2,
     fontWeight: "700",
   },
+
+  scheduleRow: {
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderColor: "#e5e7eb",
+    flexDirection: "row",
+    justifyContent: "space-between",
+  },
+
+  scheduleLabel: { fontWeight: "700", fontSize: 14 },
+
+  scheduleAmount: { fontWeight: "700", fontSize: 14 },
+
+  scheduleStatus: { marginTop: 3, fontWeight: "700" },
+  green: { color: "#19d06b" },
+  orange: { color: "#d67f00" },
 
   documentsBtn: {
     backgroundColor: "#0077C8",

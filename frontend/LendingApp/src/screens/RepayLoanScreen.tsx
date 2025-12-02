@@ -28,17 +28,28 @@ const PAYMENT_METHODS: Array<{ id: string; label: string }> = [
 
 export default function RepayLoanScreen({ navigation, route }: Props) {
   const loan = route.params?.loan;
+
   const principal = Number(loan?.principal ?? loan?.amount_requested ?? 0);
   const total = Number(loan?.total_payable ?? 0);
   const remaining = Number(loan?.remaining_balance ?? total);
   const daily = Number(loan?.daily_payment ?? 0);
 
-  // Default payment amount — by design we use daily payment, but allow paying more by selecting "Full"
-  const [amountToPay, setAmountToPay] = useState<number>(Math.min(daily || total, remaining));
+  const [amountToPay, setAmountToPay] = useState<number>(
+    Math.min(daily || total, remaining)
+  );
   const [method, setMethod] = useState<string>("gcash");
   const [loading, setLoading] = useState(false);
 
   const friendlyRemaining = useMemo(() => remaining.toFixed(2), [remaining]);
+
+  // Normalize method to backend accepted format
+  const mapPaymentMethod = (m: string) => {
+    if (m === "gcash") return "gcash";
+    if (m === "maya") return "maya";
+    if (m === "bank") return "bank_transfer";
+    if (m === "card") return "card";
+    return "gcash";
+  };
 
   const payNow = async () => {
     if (!loan?.id) {
@@ -54,7 +65,6 @@ export default function RepayLoanScreen({ navigation, route }: Props) {
     setLoading(true);
 
     try {
-      // Simulate short processing for UX (makes it feel realistic)
       await new Promise((r) => setTimeout(r, 900));
 
       const token = await AsyncStorage.getItem("userToken");
@@ -64,30 +74,40 @@ export default function RepayLoanScreen({ navigation, route }: Props) {
         return;
       }
 
-      const res = await axios.post(
-        `${API_BASE}/repayments/pay`,
-        {
-          loan_id: loan.id,
-          amount: amountToPay,
-          payment_method: method,
-        },
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
+      const payload = {
+        loan_id: loan.id,
+        amount: amountToPay,
+        payment_method: mapPaymentMethod(method),
+      };
 
-      // Expecting: { success: true, payment: {...}, remaining_balance, loan }
-      if (res.data && (res.data.success || res.status === 200)) {
-        const payload = res.data;
-        navigation.replace("PaymentReceipt", {
-          receipt: payload.payment,
-          remaining_balance: payload.remaining_balance,
-          loan: payload.loan ?? loan,
-        });
-      } else {
-        console.warn("Unexpected repayment response:", res.data);
-        Alert.alert("Payment", res.data?.error || "Payment processed but received unexpected response.");
+      console.log("📤 REPAYMENT REQUEST →", payload);
+
+      const res = await axios.post(`${API_BASE}/repayments/pay`, payload, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      console.log("📥 REPAYMENT RESPONSE →", res.data);
+
+      const payment = res.data?.payment;
+      const updatedRemaining = res.data?.remaining_balance;
+      const updatedLoan = res.data?.loan ?? loan;
+
+      if (!payment) {
+        Alert.alert(
+          "Payment",
+          "Server returned invalid payment object. Check Railway logs."
+        );
+        return;
       }
+
+      navigation.replace("PaymentReceipt", {
+        receipt: payment,
+        remaining_balance: updatedRemaining,
+        loan: updatedLoan,
+      });
     } catch (err: any) {
-      console.error("Repayment error:", err?.response?.data || err?.message || err);
+      console.error("❌ Repayment error:", err?.response?.data || err?.message);
+
       const msg =
         err?.response?.data?.error ||
         err?.response?.data?.message ||
@@ -99,14 +119,18 @@ export default function RepayLoanScreen({ navigation, route }: Props) {
   };
 
   const quickSet = (type: "daily" | "full") => {
-    if (type === "daily") setAmountToPay(Math.min(daily || total, remaining));
+    if (type === "daily")
+      setAmountToPay(Math.min(daily || total, remaining));
     else setAmountToPay(remaining);
   };
 
   return (
     <View style={{ flex: 1, backgroundColor: "#f6f7fb" }}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
+        <TouchableOpacity
+          onPress={() => navigation.goBack()}
+          style={styles.backBtn}
+        >
           <Icon name="arrow-back" size={26} color="#fff" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Make a Payment</Text>
@@ -125,29 +149,49 @@ export default function RepayLoanScreen({ navigation, route }: Props) {
 
           <View style={styles.row}>
             <Text style={styles.label}>Daily Payment</Text>
-            <Text style={styles.value}>₱ {Number(daily).toLocaleString()}</Text>
+            <Text style={styles.value}>₱ {daily.toLocaleString()}</Text>
           </View>
 
           <View style={styles.row}>
             <Text style={styles.label}>Remaining</Text>
-            <Text style={[styles.value, { color: "#D62828" }]}>₱ {Number(remaining).toLocaleString()}</Text>
+            <Text style={[styles.value, { color: "#D62828" }]}>
+              ₱ {remaining.toLocaleString()}
+            </Text>
           </View>
 
           <View style={{ marginTop: 12 }}>
-            <Text style={[styles.label, { marginBottom: 8 }]}>Amount to pay</Text>
+            <Text style={[styles.label, { marginBottom: 8 }]}>
+              Amount to pay
+            </Text>
 
-            <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 8 }}>
-              <TouchableOpacity style={styles.quickBtn} onPress={() => quickSet("daily")}>
+            <View
+              style={{
+                flexDirection: "row",
+                justifyContent: "space-between",
+                marginBottom: 8,
+              }}
+            >
+              <TouchableOpacity
+                style={styles.quickBtn}
+                onPress={() => quickSet("daily")}
+              >
                 <Text style={styles.quickBtnText}>Daily</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.quickBtn} onPress={() => quickSet("full")}>
+              <TouchableOpacity
+                style={styles.quickBtn}
+                onPress={() => quickSet("full")}
+              >
                 <Text style={styles.quickBtnText}>Full</Text>
               </TouchableOpacity>
             </View>
 
             <View style={styles.amountBox}>
-              <Text style={{ fontWeight: "800", fontSize: 20 }}>₱ {Number(amountToPay).toLocaleString()}</Text>
-              <Text style={{ color: "#666", fontSize: 12 }}>Will be charged to selected method</Text>
+              <Text style={{ fontWeight: "800", fontSize: 20 }}>
+                ₱ {Number(amountToPay).toLocaleString()}
+              </Text>
+              <Text style={{ color: "#666", fontSize: 12 }}>
+                Will be charged to selected method
+              </Text>
             </View>
           </View>
         </View>
@@ -158,29 +202,39 @@ export default function RepayLoanScreen({ navigation, route }: Props) {
           {PAYMENT_METHODS.map((m) => (
             <TouchableOpacity
               key={m.id}
-              style={[styles.methodRow, method === m.id ? styles.methodActive : undefined]}
+              style={[
+                styles.methodRow,
+                method === m.id ? styles.methodActive : undefined,
+              ]}
               onPress={() => setMethod(m.id)}
             >
               <View style={{ flexDirection: "row", alignItems: "center" }}>
                 <Icon
                   name={
                     m.id === "gcash"
-                      ? "logo-bitcoin"
+                      ? "wallet"
                       : m.id === "maya"
                       ? "card"
                       : m.id === "bank"
-                      ? "bank"
+                      ? "business"
                       : "card"
                   }
                   size={20}
                   color={method === m.id ? "#fff" : "#169AF9"}
                 />
-                <Text style={[styles.methodLabel, method === m.id ? { color: "#fff" } : undefined]}>
+                <Text
+                  style={[
+                    styles.methodLabel,
+                    method === m.id ? { color: "#fff" } : undefined,
+                  ]}
+                >
                   {m.label}
                 </Text>
               </View>
 
-              {method === m.id && <Text style={{ color: "#fff", fontWeight: "800" }}>Selected</Text>}
+              {method === m.id && (
+                <Text style={{ color: "#fff", fontWeight: "800" }}>Selected</Text>
+              )}
             </TouchableOpacity>
           ))}
 
@@ -197,7 +251,9 @@ export default function RepayLoanScreen({ navigation, route }: Props) {
           {loading ? (
             <ActivityIndicator color="#fff" />
           ) : (
-            <Text style={styles.payBtnText}>Pay ₱ {Number(amountToPay).toLocaleString()}</Text>
+            <Text style={styles.payBtnText}>
+              Pay ₱ {Number(amountToPay).toLocaleString()}
+            </Text>
           )}
         </TouchableOpacity>
 
@@ -208,11 +264,25 @@ export default function RepayLoanScreen({ navigation, route }: Props) {
 }
 
 const styles = StyleSheet.create({
-  header: { paddingTop: 50, paddingBottom: 18, paddingHorizontal: 16, backgroundColor: "#169AF9", flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  header: {
+    paddingTop: 50,
+    paddingBottom: 18,
+    paddingHorizontal: 16,
+    backgroundColor: "#169AF9",
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
   backBtn: { width: 44 },
   headerTitle: { color: "#fff", fontSize: 20, fontWeight: "700" },
 
-  card: { backgroundColor: "#fff", borderRadius: 12, padding: 14, marginBottom: 12, elevation: 2 },
+  card: {
+    backgroundColor: "#fff",
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 12,
+    elevation: 2,
+  },
   cardTitle: { fontWeight: "800", marginBottom: 8 },
   bigAmount: { fontSize: 22, fontWeight: "900", color: "#0077C8" },
 
@@ -220,15 +290,40 @@ const styles = StyleSheet.create({
   label: { color: "#666" },
   value: { fontWeight: "800" },
 
-  quickBtn: { backgroundColor: "#f3f8fb", paddingVertical: 8, paddingHorizontal: 12, borderRadius: 8 },
+  quickBtn: {
+    backgroundColor: "#f3f8fb",
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+  },
   quickBtnText: { fontWeight: "700", color: "#0077C8" },
 
-  amountBox: { backgroundColor: "#f3faff", padding: 12, borderRadius: 8, marginTop: 6 },
+  amountBox: {
+    backgroundColor: "#f3faff",
+    padding: 12,
+    borderRadius: 8,
+    marginTop: 6,
+  },
 
-  methodRow: { padding: 12, borderRadius: 8, borderWidth: 1, borderColor: "#e6f2fb", marginVertical: 6, flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  methodRow: {
+    padding: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "#e6f2fb",
+    marginVertical: 6,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
   methodActive: { backgroundColor: "#169AF9", borderColor: "#169AF9" },
   methodLabel: { marginLeft: 10, fontWeight: "700" },
 
-  payBtn: { backgroundColor: "#169AF9", paddingVertical: 14, borderRadius: 10, alignItems: "center", marginTop: 12 },
+  payBtn: {
+    backgroundColor: "#169AF9",
+    paddingVertical: 14,
+    borderRadius: 10,
+    alignItems: "center",
+    marginTop: 12,
+  },
   payBtnText: { color: "#fff", fontWeight: "900", fontSize: 16 },
 });

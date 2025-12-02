@@ -5,29 +5,44 @@ const db = require("../db");
 const auth = require("../authMiddleware");
 const admin = require("../adminMiddleware");
 
-// ===============================================================
-//      FULL LOAN DETAILS FOR BACKOFFICE ADMIN REVIEW
-// ===============================================================
-
 /**
- * GET /api/admin/loan/:loanId/details
- * - loanId kept as string (UUID) — do NOT Number() it
- * - repayment_schedule query uses real table columns:
- *    id, loan_id, day_number, expected_amount, due_date, status, paid_at
+ * FULL ADMIN LOAN DETAILS
+ *
+ * Returns:
+ *  - Loan info (joined with user info)
+ *  - Repayment schedule (canonical columns)
+ *  - Repayment history
+ *  - All loan transactions
+ *
+ * This route is used by ADMIN REVIEW SCREENS:
+ *   - AdminLoanReviewScreen
+ *   - AdminLoanDocumentsScreen
+ *   - AdminLoanApprovalScreen (View Details)
+ *
+ * Must be 100% accurate because the frontend depends on it heavily.
  */
+
 router.get("/loan/:loanId/details", auth, admin, async (req, res) => {
+  const loanId = req.params.loanId;
+
+  console.log("🔎 [AdminLoanDetails] Fetching details for loanId =", loanId);
+
+  if (!loanId || typeof loanId !== "string") {
+    console.warn("⚠️ AdminLoanDetails: invalid loanId", loanId);
+    return res.status(400).json({ error: "Invalid loanId" });
+  }
+
   try {
-    const loanId = req.params.loanId; // KEEP AS STRING (UUID)
-
-    console.log("🔎 AdminLoanDetails: fetching details for loanId =", loanId);
-
-    // 1) Loan + borrower info
+    // ============================================================
+    // 1) FETCH LOAN + BORROWER INFO
+    // ============================================================
     const loanQ = await db.query(
       `
-      SELECT l.*,
-             u.full_name AS user_full_name,
-             u.email AS user_email,
-             u.role AS user_role
+      SELECT 
+        l.*,
+        u.full_name AS user_full_name,
+        u.email AS user_email,
+        u.role AS user_role
       FROM loans l
       JOIN users u ON u.id = l.user_id
       WHERE l.id = $1
@@ -42,11 +57,21 @@ router.get("/loan/:loanId/details", auth, admin, async (req, res) => {
     }
 
     const loan = loanQ.rows[0];
+    console.log("📌 Loan found:", loan.id, "status =", loan.status);
 
-    // 2) Repayment schedule — using real column names (day_number, expected_amount, paid_at, status)
+    // ============================================================
+    // 2) FETCH REPAYMENT SCHEDULE  (canonical)
+    // ============================================================
     const scheduleQ = await db.query(
       `
-      SELECT id, loan_id, day_number, expected_amount, due_date, status, paid_at
+      SELECT 
+        id,
+        loan_id,
+        day_number,
+        expected_amount,
+        due_date,
+        status,
+        paid_at
       FROM repayment_schedule
       WHERE loan_id = $1
       ORDER BY day_number ASC
@@ -54,11 +79,20 @@ router.get("/loan/:loanId/details", auth, admin, async (req, res) => {
       [loanId]
     );
 
-    // 3) Repayment history — select conservative set of columns (adjust if your schema differs)
-    // If your table has extra columns (eg is_late_fee), you can add them here.
+    console.log(`📅 Schedule items found: ${scheduleQ.rows.length}`);
+
+    // ============================================================
+    // 3) FETCH REPAYMENT HISTORY
+    // ============================================================
     const historyQ = await db.query(
       `
-      SELECT id, loan_id, amount, created_at
+      SELECT 
+        id,
+        loan_id,
+        user_id,
+        amount,
+        is_late_fee,
+        created_at
       FROM repayment_history
       WHERE loan_id = $1
       ORDER BY created_at DESC
@@ -66,10 +100,20 @@ router.get("/loan/:loanId/details", auth, admin, async (req, res) => {
       [loanId]
     );
 
-    // 4) Loan transactions — conservative column set (adjust if needed)
+    console.log(`📘 Repayment history entries: ${historyQ.rows.length}`);
+
+    // ============================================================
+    // 4) FETCH TRANSACTIONS FOR THIS LOAN
+    // ============================================================
     const txQ = await db.query(
       `
-      SELECT id, type, amount, payment_method, reference_no, created_at
+      SELECT 
+        id,
+        type,
+        amount,
+        payment_method,
+        reference_no,
+        created_at
       FROM transactions
       WHERE loan_id = $1
       ORDER BY created_at DESC
@@ -77,19 +121,27 @@ router.get("/loan/:loanId/details", auth, admin, async (req, res) => {
       [loanId]
     );
 
-    // 5) Return unified response
+    console.log(`💳 Transactions found: ${txQ.rows.length}`);
+
+    // ============================================================
+    // 5) BUILD PAYLOAD (structured & stable for the frontend)
+    // ============================================================
     const payload = {
       loan,
-      schedule: scheduleQ.rows,
-      repayment_history: historyQ.rows,
-      transactions: txQ.rows,
+      schedule: scheduleQ.rows || [],
+      repayment_history: historyQ.rows || [],
+      transactions: txQ.rows || [],
     };
 
-    console.log("✅ AdminLoanDetails: returning payload for loanId:", loanId);
+    console.log("✅ AdminLoanDetails: returning full payload for loanId:", loanId);
     return res.json(payload);
   } catch (err) {
-    console.error("❌ Admin Loan Details Error:", err);
-    return res.status(500).json({ error: "Server error" });
+    console.error("❌ AdminLoanDetails ERROR:", err);
+    return res.status(500).json({
+      error: "Server error",
+      details: err.message,
+      hint: "Check server logs for SQL or syntax issues (adminLoanDetails.js)",
+    });
   }
 });
 

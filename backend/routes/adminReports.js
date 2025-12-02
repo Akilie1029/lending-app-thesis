@@ -8,12 +8,26 @@ const admin = require("../adminMiddleware");
 // Helper: today YYYY-MM-DD
 const today = () => new Date().toISOString().slice(0, 10);
 
+/**
+ * ADMIN REPORTS — CLEAN & CANONICAL VERSION
+ *
+ * Fully updated for canonical repayment_schedule structure:
+ *   - day_number
+ *   - expected_amount
+ *   - due_date
+ *   - status: 'pending' | 'paid' | 'overdue'
+ *   - paid_at
+ *
+ * All obsolete columns (paid, overdue boolean, installment_number) removed.
+ */
+
 // ===============================================================
 //      DAILY REPORT — Payments, disbursements, revenue
 // ===============================================================
 router.get("/daily", auth, admin, async (req, res) => {
   try {
     const date = req.query.date || today();
+    console.log(`📊 DAILY REPORT for ${date}`);
 
     const [payments, disbursed, latefees] = await Promise.all([
       db.query(
@@ -47,15 +61,15 @@ router.get("/daily", auth, admin, async (req, res) => {
       ),
     ]);
 
-    res.json({
+    return res.json({
       date,
       payments: Number(payments.rows[0].total_payments),
       disbursed: Number(disbursed.rows[0].total_disbursed),
       lateFees: Number(latefees.rows[0].total_late_fees),
     });
   } catch (err) {
-    console.error("❌ adminReports/daily error:", err);
-    res.status(500).json({ error: "Server error" });
+    console.error("❌ adminReports/daily ERROR:", err);
+    return res.status(500).json({ error: "Server error", details: err.message });
   }
 });
 
@@ -66,8 +80,9 @@ router.get("/monthly", auth, admin, async (req, res) => {
   try {
     const year = req.query.year || new Date().getFullYear();
     const month = req.query.month || new Date().getMonth() + 1;
-
     const ym = `${year}-${String(month).padStart(2, "0")}`;
+
+    console.log(`📅 MONTHLY REPORT for ${ym}`);
 
     const q = await db.query(
       `
@@ -92,15 +107,15 @@ router.get("/monthly", auth, admin, async (req, res) => {
 
     const row = q.rows[0];
 
-    res.json({
+    return res.json({
       month: ym,
       payments: Number(row.payments),
       disbursed: Number(row.disbursed),
       late_fees: Number(row.late_fees),
     });
   } catch (err) {
-    console.error("❌ adminReports/monthly error:", err);
-    res.status(500).json({ error: "Server error" });
+    console.error("❌ adminReports/monthly ERROR:", err);
+    return res.status(500).json({ error: "Server Error", details: err.message });
   }
 });
 
@@ -109,7 +124,8 @@ router.get("/monthly", auth, admin, async (req, res) => {
 // ===============================================================
 router.get("/interest-summary", auth, admin, async (req, res) => {
   try {
-    // interest = total_payable - principal for completed loans
+    console.log("📈 INTEREST SUMMARY");
+
     const q = await db.query(
       `
       SELECT
@@ -119,35 +135,53 @@ router.get("/interest-summary", auth, admin, async (req, res) => {
       `
     );
 
-    res.json({ total_interest: Number(q.rows[0].total_interest) });
+    return res.json({ total_interest: Number(q.rows[0].total_interest) });
   } catch (err) {
-    console.error("❌ adminReports/interest-summary error:", err);
-    res.status(500).json({ error: "Server error" });
+    console.error("❌ interest-summary ERROR:", err);
+    return res.status(500).json({ error: "Server error", details: err.message });
   }
 });
 
 // ===============================================================
-//      OVERDUE LOANS SUMMARY
+//      OVERDUE LOANS SUMMARY (UPDATED FOR CANONICAL SCHEMA)
 // ===============================================================
 router.get("/overdue", auth, admin, async (req, res) => {
   try {
+    console.log("📌 GENERATING OVERDUE LOAN SUMMARY");
+
+    /**
+     * OLD LOGIC: used columns like rs.overdue & rs.paid (deprecated)
+     *
+     * NEW LOGIC:
+     *  Overdue installment = repayment_schedule.status = 'overdue'
+     *
+     * We count overdue installments PER LOAN.
+     */
+
     const overdueQ = await db.query(
       `
-      SELECT l.id, l.user_id, l.principal, l.remaining_balance,
-             COUNT(rs.id) FILTER (WHERE rs.overdue = TRUE AND rs.paid = FALSE) AS overdue_days
+      SELECT 
+        l.id AS loan_id,
+        l.user_id,
+        l.principal,
+        l.remaining_balance,
+
+        -- Count of overdue schedule rows
+        COUNT(rs.id) FILTER (WHERE rs.status = 'overdue') AS overdue_days
+
       FROM loans l
       JOIN repayment_schedule rs ON rs.loan_id = l.id
       WHERE l.status = 'active'
-      GROUP BY l.id
+      GROUP BY l.id, l.user_id, l.principal, l.remaining_balance
+      ORDER BY overdue_days DESC
       `
     );
 
-    res.json(overdueQ.rows);
+    return res.json(overdueQ.rows);
   } catch (err) {
-    console.error("❌ adminReports/overdue error:", err);
-    res.status(500).json({ error: "Server error" });
+    console.error("❌ adminReports/overdue ERROR:", err);
+    return res.status(500).json({ error: "Server error", details: err.message });
   }
 });
-
 
 module.exports = router;

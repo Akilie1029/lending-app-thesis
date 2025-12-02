@@ -1,17 +1,42 @@
 // adminMiddleware.js
-// Ensures authMiddleware ran first and that the user has ADMIN role
 
-module.exports = function (req, res, next) {
-  // authMiddleware must set req.user
-  if (!req.user) {
-    return res.status(401).json({ error: "Unauthorized" });
-  }
+/**
+ * adminMiddleware
+ *
+ * Protects admin routes.
+ *
+ * Requires:
+ *   req.user = { id, role }
+ *   role must be 'admin' (case-insensitive)
+ *
+ * If role is missing or not admin → 403 Forbidden
+ *
+ * This middleware MUST be placed AFTER authMiddleware.
+ */
 
-  // Role check (case-insensitive, normalized in authMiddleware)
-  const role = (req.user.role || "").toString().toUpperCase();
-  if (role === "ADMIN" || role === "SUPERADMIN") {
+function adminMiddleware(req, res, next) {
+  try {
+    // Ensure authMiddleware already decoded the token
+    if (!req.user) {
+      console.warn("🔒 adminMiddleware: req.user missing — authMiddleware was not run or token invalid.");
+      return res.status(401).json({ error: "Unauthorized", message: "Authentication required" });
+    }
+
+    const role = (req.user.role || "").toLowerCase();
+
+    console.log(`🛂 adminMiddleware: user=${req.user.id} role=${role}`);
+
+    if (role !== "admin") {
+      console.warn(`🚫 adminMiddleware: access denied for user=${req.user.id}, role=${role}`);
+      return res.status(403).json({ error: "Forbidden", message: "Admin access required" });
+    }
+
+    console.log(`✅ adminMiddleware: access granted to admin user=${req.user.id}`);
     return next();
+  } catch (err) {
+    console.error("❌ adminMiddleware ERROR:", err);
+    return res.status(500).json({ error: "Server error", details: err.message });
   }
+}
 
-  return res.status(403).json({ error: "Access denied. Admin role required." });
-};
+module.exports = adminMiddleware;

@@ -1,34 +1,46 @@
-// backend/controllers/adminPaymentsController.js
+// controllers/adminPaymentsController.js
 const db = require("../db");
 
-// safe number
+// safe number helper
 const num = (v) => (v == null ? 0 : Number(v));
 
 /**
- * GET /api/admin/all-payments
- * Query params:
- *  - q: search term (user full_name or email)
- *  - from: YYYY-MM-DD
- *  - to: YYYY-MM-DD
- *  - method: payment_method filter
- *  - page: page number (default 1)
- *  - limit: page size (default 25)
- *  - sort: 'created_at'|'amount' (prefix '-' for desc) default '-created_at'
+ * ADMIN — GET ALL PAYMENTS
+ *
+ * Supports:
+ *  - q (search by user name or email)
+ *  - from / to (date range)
+ *  - method (payment_method)
+ *  - page, limit
+ *  - sort = created_at | -created_at | amount | -amount
+ *
+ * Security:
+ *  - UUID-safe (no Number() casts)
+ *  - Sort whitelist to prevent SQL injection
+ *  - Debug logs to trace admin activity
  */
 async function getAllPayments(req, res) {
   try {
+    console.log("\n===============================");
+    console.log("💳 [ADMIN] getAllPayments triggered by:", req.user?.id);
+    console.log("Query params:", req.query);
+    console.log("===============================\n");
+
     const q = (req.query.q || "").trim();
-    const from = req.query.from; // YYYY-MM-DD
-    const to = req.query.to; // YYYY-MM-DD
-    const method = (req.query.method || "").trim();
+    const from = req.query.from || null;
+    const to = req.query.to || null;
+    const method = (req.query.method || "").trim().toLowerCase();
+
+    // pagination
     const page = Math.max(1, parseInt(req.query.page || "1", 10));
     const limit = Math.max(1, Math.min(200, parseInt(req.query.limit || "25", 10)));
     const offset = (page - 1) * limit;
-    const sortRaw = req.query.sort || "-created_at";
 
-    // build allowed sorts
+    // sorting
+    const sortRaw = req.query.sort || "-created_at";
     let sortColumn = "created_at";
     let sortDir = "DESC";
+
     if (sortRaw.startsWith("-")) {
       sortColumn = sortRaw.slice(1);
       sortDir = "DESC";
@@ -36,41 +48,42 @@ async function getAllPayments(req, res) {
       sortColumn = sortRaw;
       sortDir = "ASC";
     }
-    // prevent SQL injection by whitelisting
+
     const ALLOWED_SORTS = ["created_at", "amount"];
     if (!ALLOWED_SORTS.includes(sortColumn)) {
+      console.warn("⚠️ Invalid sort column, defaulting to created_at");
       sortColumn = "created_at";
-      sortDir = "DESC";
     }
 
-    // we only include loan-related incoming payments and late fees
+    console.log(`📌 Sorting by: ${sortColumn} ${sortDir}`);
+
     const allowedTypes = ["loan_payment", "repayment", "late_fee"];
 
-    // base where clauses
+    // build SQL
     const wheres = [];
     const params = [];
     let idx = 1;
 
-    // type filter
+    // only allowed payment types
     wheres.push(`t.type = ANY($${idx}::text[])`);
     params.push(allowedTypes);
     idx++;
 
-    // search q -> users full_name or email
+    // search (full name or email)
     if (q) {
       wheres.push(`(LOWER(u.full_name) LIKE $${idx} OR LOWER(u.email) LIKE $${idx})`);
       params.push(`%${q.toLowerCase()}%`);
       idx++;
     }
 
-    // payment method
+    // payment method filter
     if (method) {
       wheres.push(`LOWER(t.payment_method) = $${idx}`);
-      params.push(method.toLowerCase());
+      params.push(method);
       idx++;
     }
 
-    // date range: use created_at::date
+    // date range filters
     if (from) {
       wheres.push(`t.created_at::date >= $${idx}::date`);
       params.push(from);
@@ -84,7 +97,11 @@ async function getAllPayments(req, res) {
 
     const whereClause = wheres.length > 0 ? `WHERE ${wheres.join(" AND ")}` : "";
 
-    // total count + sum
+    console.log("🔍 whereClause =", whereClause);
+
+    // ============================================================
+    // COUNT + SUM
+    // ============================================================
     const totalsSql = `
       SELECT
         COUNT(*)::int AS count,
@@ -95,8 +112,11 @@ async function getAllPayments(req, res) {
     `;
     const totalsRes = (await db.query(totalsSql, params)).rows[0] || { count: 0, sum: 0 };
 
-    // fetch paginated rows with user details and loan reference
-    // order by sanitized column/direction
+    console.log("📊 totals:", totalsRes);
+
+    // ============================================================
+    // FETCH PAGINATED ROWS
+    // ============================================================
     const dataSql = `
       SELECT
         t.id,
@@ -114,11 +134,14 @@ async function getAllPayments(req, res) {
       ORDER BY ${sortColumn} ${sortDir}
       LIMIT $${idx} OFFSET $${idx + 1}
     `;
+
     params.push(limit, offset);
 
     const dataRes = (await db.query(dataSql, params)).rows || [];
 
-    // respond
+    // ============================================================
+    // FORMAT RESPONSE
+    // ============================================================
     return res.json({
       payments: dataRes.map((r) => ({
         id: r.id,
@@ -131,12 +154,22 @@ async function getAllPayments(req, res) {
         payment_method: r.payment_method,
         created_at: r.created_at,
       })),
-      meta: { page, limit, total: Number(totalsRes.count || 0) },
-      totals: { count: Number(totalsRes.count || 0), sum: Number(totalsRes.sum || 0) },
+      meta: {
+        page,
+        limit,
+        total: Number(totalsRes.count),
+      },
+      totals: {
+        count: Number(totalsRes.count),
+        sum: Number(totalsRes.sum),
+      },
     });
   } catch (err) {
-    console.error("getAllPayments ERROR:", err);
-    return res.status(500).json({ error: "Server error", details: err.message });
+    console.error("❌ getAllPayments ERROR:", err);
+    return res.status(500).json({
+      error: "Server error",
+      details: err.message,
+    });
   }
 }
 
