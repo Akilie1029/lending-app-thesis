@@ -2,36 +2,78 @@
 const cloudinary = require("cloudinary").v2;
 const streamifier = require("streamifier");
 
-// Configure cloudinary via env (set on Railway)
-// CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET
+// Debug: Check env variables
+console.log("🔧 Cloudinary Config Check:");
+console.log(" - CLOUD_NAME:", process.env.CLOUDINARY_CLOUD_NAME);
+console.log(" - API_KEY:", process.env.CLOUDINARY_API_KEY ? "(loaded)" : "(missing)");
+console.log(" - API_SECRET:", process.env.CLOUDINARY_API_SECRET ? "(loaded)" : "(missing)");
+
+// Configure cloudinary
 cloudinary.config({
-  cloud_name: process.env.CLOUDINARY_CLOUD_NAME || process.env.CLOUDINARY_URL?.match(/cloudinary:\/\/([^:]+):([^@]+)@([^/]+)/)?.[3],
+  cloud_name:
+    process.env.CLOUDINARY_CLOUD_NAME ||
+    process.env.CLOUDINARY_URL?.match(/cloudinary:\/\/([^:]+):([^@]+)@([^/]+)/)?.[3],
   api_key: process.env.CLOUDINARY_API_KEY,
   api_secret: process.env.CLOUDINARY_API_SECRET,
   secure: true,
 });
 
-function uploadBufferToCloudinary(buffer, { folder = "", publicId = null, resource_type = "image" } = {}) {
+// Debug: Confirm config applied
+console.log("🌩 Cloudinary initialized with cloud name:", cloudinary.config().cloud_name);
+
+function uploadBufferToCloudinary(
+  buffer,
+  { folder = "", publicId = null, resource_type = "image" } = {}
+) {
+  console.log("⬆️ Starting Cloudinary Upload");
+  console.log(" - Folder:", folder);
+  console.log(" - Public ID (optional):", publicId);
+
   return new Promise((resolve, reject) => {
     const opts = {};
     if (folder) opts.folder = folder;
     if (publicId) opts.public_id = publicId;
     opts.resource_type = resource_type;
-    const uploadStream = cloudinary.uploader.upload_stream(opts, (err, result) => {
-      if (err) return reject(err);
+
+    console.log("📦 Upload Options:", opts);
+
+    const uploadStream = cloudinary.uploader.upload_stream((err, result) => {
+      if (err) {
+        console.error("❌ Cloudinary Upload Error:", err);
+        return reject(err);
+      }
+
+      console.log("✅ Cloudinary Upload Success:");
+      console.log(" - URL:", result.secure_url);
+      console.log(" - Public ID:", result.public_id);
+
       resolve(result);
     });
+
+    // Debug: Verify buffer size
+    console.log("📏 Uploading buffer size:", buffer.length, "bytes");
+
     streamifier.createReadStream(buffer).pipe(uploadStream);
   });
 }
 
 async function destroyPublicId(publicId) {
-  if (!publicId) return null;
+  if (!publicId) {
+    console.log("⚠️ destroyPublicId called with null publicId");
+    return null;
+  }
+
+  console.log("🗑 Destroying Cloudinary public ID:", publicId);
+
   try {
-    const res = await cloudinary.uploader.destroy(publicId, { resource_type: "image" });
+    const res = await cloudinary.uploader.destroy(publicId, {
+      resource_type: "image",
+    });
+
+    console.log("🧹 Cloudinary destroy result:", res);
     return res;
   } catch (err) {
-    console.warn("cloudinary destroy error", err?.message || err);
+    console.warn("❌ Cloudinary destroy error:", err?.message || err);
     return null;
   }
 }
@@ -39,5 +81,5 @@ async function destroyPublicId(publicId) {
 module.exports = {
   uploadBufferToCloudinary,
   destroyPublicId,
-  cloudinary, // export for debugging if needed
+  cloudinary, // export for debugging
 };
