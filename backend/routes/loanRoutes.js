@@ -5,7 +5,7 @@ const db = require("../db");
 const auth = require("../authMiddleware");
 
 // ===============================================================
-//  APPLY FOR LOAN
+//  APPLY FOR LOAN (UPDATED TO MATCH FRONTEND FIELD NAMES)
 // ===============================================================
 router.post("/apply", auth, async (req, res) => {
   try {
@@ -25,15 +25,15 @@ router.post("/apply", auth, async (req, res) => {
       payout_method,
       payout_details,
 
-      // Cloudinary URLs (frontend uploads images first)
-      government_id_url,
-      selfie_with_id_url,
-      proof_of_funds_url,
+      // === UPDATED FIELD NAMES (from frontend) ===
+      valid_id_url,          // was government_id_url
+      selfie_id_url,         // was selfie_with_id_url
+      proof_income_url,      // was proof_of_funds_url
 
-      // Local fallback (no cloudinary yet)
-      government_id_local_uri,
-      selfie_with_id_local_uri,
-      proof_of_funds_local_uri,
+      // Local fallback
+      valid_id_local_uri,        // was government_id_local_uri
+      selfie_id_local_uri,       // was selfie_with_id_local_uri
+      proof_income_local_uri,    // was proof_of_funds_local_uri
     } = req.body;
 
     if (!principal || !days || !purpose) {
@@ -49,6 +49,7 @@ router.post("/apply", auth, async (req, res) => {
         principal, days, purpose,
         payout_method, payout_details,
 
+        /* UPDATED FIELD NAMES */
         government_id_url, selfie_with_id_url, proof_of_funds_url,
         government_id_local_uri, selfie_with_id_local_uri, proof_of_funds_local_uri,
 
@@ -60,6 +61,7 @@ router.post("/apply", auth, async (req, res) => {
         $9,$10,$11,
         $12,$13,
 
+        /* MAP FRONTEND NAMES TO DATABASE COLUMNS */
         $14,$15,$16,
         $17,$18,$19,
 
@@ -82,13 +84,15 @@ router.post("/apply", auth, async (req, res) => {
         payout_method,
         payout_details,
 
-        government_id_url,
-        selfie_with_id_url,
-        proof_of_funds_url,
+        // CLOUD URLs mapped to old DB column names
+        valid_id_url,
+        selfie_id_url,
+        proof_income_url,
 
-        government_id_local_uri,
-        selfie_with_id_local_uri,
-        proof_of_funds_local_uri,
+        // LOCAL fallback URLs
+        valid_id_local_uri,
+        selfie_id_local_uri,
+        proof_income_local_uri,
       ]
     );
 
