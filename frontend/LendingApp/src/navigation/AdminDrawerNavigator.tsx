@@ -18,11 +18,12 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import AdminDashboardScreen from "../screens/AdminDashboardScreen";
 import AdminLoanApprovalScreen from "../screens/AdminLoanApprovalScreen";
 import AdminDisbursementScreen from "../screens/AdminDisbursementScreen";
-import AdminApprovedLoansScreen from "../screens/AdminApprovedLoansScreen"; // hidden but kept
+import AdminApprovedLoansScreen from "../screens/AdminApprovedLoansScreen";
 import AdminAllLoansScreen from "../screens/AdminAllLoansScreen";
 import AdminPaymentsScreen from "../screens/AdminPaymentScreen";
 
-// ⭐ NEW — Loan Documents screen (hidden)
+// ⭐ NEW
+import AdminLoanReviewScreen from "../screens/AdminLoanReviewScreen";
 import AdminLoanDocumentsScreen from "../screens/AdminLoanDocumentsScreen";
 
 const Drawer = createDrawerNavigator();
@@ -52,15 +53,11 @@ function AdminCustomDrawer(props: any) {
     <View style={{ flex: 1, backgroundColor: "#169AF9" }}>
       {/* HEADER */}
       <View style={styles.header}>
-        <Image
-          source={require("../../assets/logo.png")}
-          style={styles.logo}
-        />
+        <Image source={require("../../assets/logo.png")} style={styles.logo} />
         <Text style={styles.adminName}>KAURta Admin</Text>
         <Text style={styles.adminEmail}>Management Panel</Text>
       </View>
 
-      {/* MENU LIST */}
       <DrawerContentScrollView
         {...props}
         contentContainerStyle={styles.drawerScroll}
@@ -180,7 +177,14 @@ export default function AdminDrawerNavigator() {
       {/* Payments */}
       <Drawer.Screen name="AdminPayments" component={AdminPaymentsScreen} />
 
-      {/* ⭐ NEW — Loan Documents Screen (hidden) */}
+      {/* ⭐ NEW — Loan Review Screen */}
+      <Drawer.Screen
+        name="AdminLoanReviewScreen"
+        component={AdminLoanReviewScreen}
+        options={{ drawerItemStyle: { display: "none" } }}
+      />
+
+      {/* ⭐ NEW — Loan Documents Screen */}
       <Drawer.Screen
         name="AdminLoanDocuments"
         component={AdminLoanDocumentsScreen}
@@ -225,7 +229,6 @@ const styles = StyleSheet.create({
     borderWidth: 3,
     borderColor: "#169AF9",
   },
-  drawerItems: {},
   menuItem: {
     flexDirection: "row",
     alignItems: "center",
@@ -259,7 +262,6 @@ const styles = StyleSheet.create({
   bottomText: {
     fontSize: 15,
     fontWeight: "600",
-    color: "#169AF9",
     marginLeft: 10,
   },
 });

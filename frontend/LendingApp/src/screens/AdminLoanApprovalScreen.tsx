@@ -15,8 +15,8 @@ import { useFocusEffect } from "@react-navigation/native";
 import SmallHeader from "../components/SmallHeader";
 import api from "../services/api";
 
-const PRIMARY = "#169AF9";      // KAURta Blue
-const BG_LIGHT = "#F2F7FF";     // subtle light blue background
+const PRIMARY = "#169AF9";
+const BG_LIGHT = "#F2F7FF";
 
 export default function AdminLoanApprovalScreen({ navigation }: any) {
   const [loans, setLoans] = useState<any[]>([]);
@@ -24,16 +24,16 @@ export default function AdminLoanApprovalScreen({ navigation }: any) {
   const [refreshing, setRefreshing] = useState(false);
   const [processing, setProcessing] = useState<Record<number, boolean>>({});
 
-  // --------------------------------------------------
+  // ------------------------------
   // Load Pending Loans
-  // --------------------------------------------------
+  // ------------------------------
   const loadLoans = async () => {
     try {
       setLoading(true);
       const res = await api.get("/admin/pending");
       setLoans(res.data || []);
     } catch (err) {
-      console.log("❌ Pending loans load error:", err?.response?.data || err);
+      console.log("❌ Pending loans error:", err?.response?.data || err);
       Alert.alert("Error", "Unable to load pending loan applications.");
     } finally {
       setLoading(false);
@@ -52,9 +52,9 @@ export default function AdminLoanApprovalScreen({ navigation }: any) {
     loadLoans();
   };
 
-  // --------------------------------------------------
+  // ------------------------------
   // Reject Loan
-  // --------------------------------------------------
+  // ------------------------------
   const rejectLoan = (loanId: number) => {
     Alert.alert(
       "Reject Loan",
@@ -82,16 +82,14 @@ export default function AdminLoanApprovalScreen({ navigation }: any) {
     );
   };
 
-  // --------------------------------------------------
-  // Card Renderer
-  // --------------------------------------------------
+  // ------------------------------
+  // Render Loan Card
+  // ------------------------------
   const renderLoan = ({ item }: { item: any }) => (
     <View style={styles.card}>
       <View style={styles.cardHeader}>
         <Text style={styles.name}>{item.full_name}</Text>
-        <Text style={styles.amount}>
-          ₱ {Number(item.principal ?? 0).toLocaleString()}
-        </Text>
+        <Text style={styles.amount}>₱ {Number(item.principal).toLocaleString()}</Text>
       </View>
 
       <Text style={styles.purpose}>{item.purpose}</Text>
@@ -113,19 +111,22 @@ export default function AdminLoanApprovalScreen({ navigation }: any) {
       <View style={styles.actions}>
         <TouchableOpacity
           style={[styles.actionBtn, styles.reviewBtn]}
-          onPress={() =>
-            navigation.navigate("AdminLoanReviewScreen", {
-              loanId: item.id,
-            })
-          }
+          onPress={() => {
+            console.log("Navigating to review for loan:", item.id);
+
+            navigation.navigate(
+              "AdminLoanReviewScreen", // ← Make sure this exists in navigator!
+              { loanId: item.id }
+            );
+          }}
         >
           <Text style={styles.actionText}>Review</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
           style={[styles.actionBtn, styles.rejectBtn]}
-          disabled={processing[item.id]}
           onPress={() => rejectLoan(item.id)}
+          disabled={processing[item.id]}
         >
           {processing[item.id] ? (
             <ActivityIndicator color="#fff" />
@@ -137,9 +138,9 @@ export default function AdminLoanApprovalScreen({ navigation }: any) {
     </View>
   );
 
-  // --------------------------------------------------
-  // Loading Screen
-  // --------------------------------------------------
+  // ------------------------------
+  // Loading State
+  // ------------------------------
   if (loading) {
     return (
       <View style={styles.container}>
@@ -151,14 +152,13 @@ export default function AdminLoanApprovalScreen({ navigation }: any) {
     );
   }
 
-  // --------------------------------------------------
-  // Empty State Screen (fixed to use KAURta colors)
-  // --------------------------------------------------
+  // ------------------------------
+  // Empty State
+  // ------------------------------
   if (loans.length === 0) {
     return (
       <View style={styles.container}>
         <SmallHeader title="Loan Approval" />
-
         <View style={styles.emptyContainer}>
           <Text style={styles.emptyText}>No pending loans at this time.</Text>
         </View>
@@ -166,9 +166,9 @@ export default function AdminLoanApprovalScreen({ navigation }: any) {
     );
   }
 
-  // --------------------------------------------------
-  // MAIN CONTENT
-  // --------------------------------------------------
+  // ------------------------------
+  // Main Content
+  // ------------------------------
   return (
     <View style={styles.container}>
       <SmallHeader title="Loan Approval" />
@@ -186,10 +186,9 @@ export default function AdminLoanApprovalScreen({ navigation }: any) {
   );
 }
 
-// =======================================================
-// ⭐ KAURta UI Styles
-// =======================================================
-
+// ------------------------------
+// Styles
+// ------------------------------
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -225,10 +224,6 @@ const styles = StyleSheet.create({
     padding: 18,
     borderRadius: 18,
     marginBottom: 16,
-    shadowColor: "#000",
-    shadowOpacity: 0.08,
-    shadowOffset: { width: 0, height: 4 },
-    shadowRadius: 8,
     elevation: 2,
     borderWidth: 1,
     borderColor: "#D6E8FF",
@@ -303,3 +298,5 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
 });
+
+export default AdminLoanApprovalScreen;

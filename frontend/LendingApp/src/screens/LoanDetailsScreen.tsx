@@ -1,234 +1,203 @@
-import React, { useEffect, useState } from "react";
+// src/screens/LoanDetailsScreen.tsx
+import React from "react";
 import {
   View,
   Text,
   StyleSheet,
   ScrollView,
-  ActivityIndicator,
   TouchableOpacity,
-  Alert,
 } from "react-native";
-import LinearGradient from "react-native-linear-gradient";
 import Icon from "react-native-vector-icons/Ionicons";
-import { useRoute, useNavigation } from "@react-navigation/native";
-import axios from "axios";
-import AsyncStorage from "@react-native-async-storage/async-storage";
-import { API_BASE } from "../config";
 
-export default function LoanDetailsScreen() {
-  const route = useRoute<any>();
-  const navigation = useNavigation<any>();
+export default function LoanDetailsScreen({ route, navigation }: any) {
+  const { loan } = route.params;
 
-  // loan may be passed from previous screen to avoid refetch
-  const passedLoan = route.params?.loan;
-  const passedLoanId = route.params?.loanId;
+  const principal = Number(loan.principal ?? 0);
+  const interestRate = 0.20; // 20%
+  const months = loan.days ? Math.ceil(loan.days / 30) : 1;
 
-  const [loan, setLoan] = useState<any>(passedLoan || null);
-  const [loading, setLoading] = useState(!passedLoan);
-  const [refreshing, setRefreshing] = useState(false);
-
-  const id = passedLoan?.id ?? passedLoanId;
-
-  useEffect(() => {
-    if (!id || passedLoan) return;
-    fetchLoan();
-  }, [id]);
-
-  const fetchLoan = async () => {
-    try {
-      setLoading(true);
-      const token = await AsyncStorage.getItem("userToken");
-      if (!token) {
-        Alert.alert("Not Authenticated", "Please login again.");
-        setLoading(false);
-        return;
-      }
-
-      const res = await axios.get(`${API_BASE}/loans/${id}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-
-      setLoan(res.data);
-    } catch (err: any) {
-      console.error("Loan details error:", err?.response?.data || err?.message);
-      Alert.alert("Error", "Unable to load loan details.");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const refresh = async () => {
-    setRefreshing(true);
-    await fetchLoan();
-    setRefreshing(false);
-  };
-
-  if (!loan && loading) {
-    return (
-      <View style={styles.center}>
-        <ActivityIndicator size="large" color="#169AF9" />
-      </View>
-    );
-  }
-
-  if (!loan) {
-    return (
-      <View style={styles.center}>
-        <Text>Loan not found.</Text>
-      </View>
-    );
-  }
-
-  // normalize fields (backwards-compatible)
-  const principal = Number(loan.principal ?? loan.amount_requested ?? 0);
-  const total = Number(loan.total_payable ?? 0);
-  const remaining = Number(loan.remaining_balance ?? 0);
-  const daily = Number(loan.daily_payment ?? loan.daily ?? 0);
-  const status = (loan.status || "").toString().toLowerCase();
-
-  const formattedDate = (d?: string) =>
-    d ? new Date(d).toLocaleDateString() : "—";
-
-  const handleMakePayment = () => {
-    // navigate to payment screen and pass loan object
-    navigation.navigate("LoanPayMethod" as any, { loan });
-  };
-
-  const handleViewPayments = () => {
-    navigation.navigate("Payment History" as any, { loanId: loan.id });
-  };
+  const interestAmount = principal * interestRate * months;
+  const totalRepay = principal + interestAmount;
+  const monthlyPayment = totalRepay / months;
 
   return (
-    <ScrollView style={{ flex: 1, backgroundColor: "#f6f7fb" }}>
-      <LinearGradient
-        colors={["#169AF9", "#37AAF2"]}
-        style={styles.header}
-      >
-        <TouchableOpacity onPress={() => navigation.goBack()}>
+    <View style={styles.container}>
+      {/* HEADER */}
+      <View style={styles.header}>
+        <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
           <Icon name="arrow-back" size={26} color="#fff" />
         </TouchableOpacity>
 
         <Text style={styles.headerTitle}>Loan Details</Text>
+      </View>
 
-        <View style={{ width: 44 }} />
-      </LinearGradient>
-
-      <View style={styles.container}>
+      <ScrollView contentContainerStyle={{ paddingBottom: 40 }}>
+        {/* ----------- LOAN SUMMARY CARD ----------- */}
         <View style={styles.card}>
-          <Text style={styles.label}>Principal</Text>
-          <Text style={styles.value}>₱ {principal.toLocaleString()}</Text>
+          <Text style={styles.cardTitle}>Loan Summary</Text>
 
-          <Text style={styles.label}>Total Payable</Text>
-          <Text style={styles.value}>₱ {total.toLocaleString()}</Text>
+          <View style={styles.row}>
+            <Text style={styles.label}>Loan Amount:</Text>
+            <Text style={styles.value}>₱ {principal.toLocaleString()}.00</Text>
+          </View>
 
-          <Text style={styles.label}>Daily Payment</Text>
-          <Text style={styles.value}>₱ {daily.toLocaleString()}</Text>
+          <View style={styles.row}>
+            <Text style={styles.label}>Interest Rate:</Text>
+            <Text style={styles.value}>20% (per month)</Text>
+          </View>
 
-          <Text style={styles.label}>Remaining Balance</Text>
-          <Text style={[styles.value, { color: "#D62828" }]}>
-            ₱ {remaining.toLocaleString()}
+          <View style={styles.row}>
+            <Text style={styles.label}>Interest Amount:</Text>
+            <Text style={styles.value}>
+              ₱ {interestAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+            </Text>
+          </View>
+
+          <View style={styles.row}>
+            <Text style={styles.label}>Repayment Term:</Text>
+            <Text style={styles.value}>{months} {months > 1 ? "months" : "month"}</Text>
+          </View>
+
+          <View style={styles.row}>
+            <Text style={styles.label}>Purpose:</Text>
+            <Text style={styles.value}>{loan.purpose || "—"}</Text>
+          </View>
+
+          <View style={styles.row}>
+            <Text style={styles.label}>Date Submitted:</Text>
+            <Text style={styles.value}>
+              {loan.created_at
+                ? new Date(loan.created_at).toLocaleDateString()
+                : "—"}
+            </Text>
+          </View>
+
+          <View style={styles.row}>
+            <Text style={styles.label}>Status:</Text>
+
+            <Text
+              style={[
+                styles.value,
+                {
+                  color:
+                    loan.status === "active"
+                      ? "#0A9EFA"
+                      : loan.status === "pending"
+                      ? "#F5A623"
+                      : "#28A745",
+                  fontWeight: "700",
+                },
+              ]}
+            >
+              {loan.status?.toUpperCase()}
+            </Text>
+          </View>
+        </View>
+
+        {/* ----------- REPAYMENT BREAKDOWN CARD ----------- */}
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Repayment Breakdown</Text>
+
+          <Text style={styles.description}>
+            Interest is applied at 20% per month. The interest shown is
+            calculated as:
+          </Text>
+          <Text style={styles.descriptionFormula}>
+            Interest = Principal × Monthly Rate × Number of Months
           </Text>
 
-          <Text style={styles.label}>Status</Text>
-          <Text style={styles.value}>{(loan.status || "—").toString().toUpperCase()}</Text>
-
-          <Text style={styles.label}>Purpose</Text>
-          <Text style={styles.small}>{loan.purpose || "—"}</Text>
-
-          <Text style={styles.label}>Term</Text>
-          <Text style={styles.small}>{loan.days ?? "—"} days</Text>
-
-          <Text style={styles.label}>Applied At</Text>
-          <Text style={styles.small}>{formattedDate(loan.created_at)}</Text>
-
-          {loan.disbursed_at && (
-            <>
-              <Text style={styles.label}>Disbursed At</Text>
-              <Text style={styles.small}>{formattedDate(loan.disbursed_at)}</Text>
-            </>
-          )}
-
-          {loan.due_date && (
-            <>
-              <Text style={styles.label}>Next Due Date</Text>
-              <Text style={styles.small}>{formattedDate(loan.due_date)}</Text>
-            </>
-          )}
-
-          {loan.latest_due_date && loan.latest_due_date !== loan.due_date && (
-            <>
-              <Text style={styles.label}>Latest Due Date</Text>
-              <Text style={styles.small}>{formattedDate(loan.latest_due_date)}</Text>
-            </>
-          )}
-        </View>
-
-        {/* Action buttons */}
-        <View style={{ marginTop: 14 }}>
-          {/* Show Make Payment only for active/approved */}
-          {status === "active" || status === "approved" ? (
-            <TouchableOpacity style={styles.payBtn} onPress={handleMakePayment}>
-              <Text style={styles.payText}>Make a Payment</Text>
-            </TouchableOpacity>
-          ) : null}
-
-          <TouchableOpacity
-            style={[styles.payBtn, { backgroundColor: "#fff", borderWidth: 1, marginTop: 10 }]}
-            onPress={handleViewPayments}
-          >
-            <Text style={{ color: "#169AF9", fontWeight: "700" }}>View Payment History</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[styles.payBtn, { backgroundColor: "#eee", marginTop: 10 }]}
-            onPress={refresh}
-            disabled={refreshing}
-          >
-            <Text style={{ color: "#333", fontWeight: "700" }}>
-              {refreshing ? "Refreshing..." : "Refresh"}
+          <View style={[styles.row, { marginTop: 10 }]}>
+            <Text style={styles.label}>Total Amount to Repay:</Text>
+            <Text style={styles.value}>
+              ₱ {totalRepay.toLocaleString(undefined, { minimumFractionDigits: 2 })}
             </Text>
-          </TouchableOpacity>
-        </View>
+          </View>
 
-        <View style={{ height: 60 }} />
-      </View>
-    </ScrollView>
+          <View style={styles.row}>
+            <Text style={styles.label}>Monthly Payment:</Text>
+            <Text style={styles.value}>
+              ₱ {monthlyPayment.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+            </Text>
+          </View>
+        </View>
+      </ScrollView>
+    </View>
   );
 }
 
+/* ----------------------- STYLES ----------------------- */
 const styles = StyleSheet.create({
-  header: {
-    paddingTop: 50,
-    paddingBottom: 20,
-    paddingHorizontal: 16,
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
+  container: {
+    flex: 1,
+    backgroundColor: "#f6f7fb",
   },
-  headerTitle: { color: "#fff", fontWeight: "700", fontSize: 20 },
 
-  container: { padding: 16 },
-  center: { flex: 1, justifyContent: "center", alignItems: "center" },
+  header: {
+    width: "100%",
+    backgroundColor: "#169AF9",
+    paddingTop: 50,
+    paddingBottom: 18,
+    paddingHorizontal: 15,
+    flexDirection: "row",
+    alignItems: "center",
+    elevation: 4,
+  },
+
+  backBtn: {
+    marginRight: 10,
+  },
+
+  headerTitle: {
+    fontSize: 20,
+    fontWeight: "700",
+    color: "#fff",
+  },
 
   card: {
     backgroundColor: "#fff",
-    borderRadius: 12,
+    marginHorizontal: 20,
+    marginTop: 15,
+    borderRadius: 16,
     padding: 16,
-    elevation: 2,
-    borderWidth: 2,
-    borderColor: "#e8f4ff",
+    borderWidth: 3,
+    borderColor: "#169AF9",
   },
 
-  label: { color: "#666", marginTop: 12 },
-  value: { fontSize: 22, fontWeight: "900", marginTop: 4 },
-  small: { fontSize: 14, color: "#444", marginTop: 4 },
-
-  payBtn: {
-    backgroundColor: "#169AF9",
-    paddingVertical: 14,
-    borderRadius: 10,
-    alignItems: "center",
-    marginTop: 6,
+  cardTitle: {
+    fontSize: 18,
+    fontWeight: "700",
+    color: "#000",
+    marginBottom: 12,
   },
-  payText: { color: "#fff", fontWeight: "800" },
+
+  row: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginBottom: 8,
+  },
+
+  label: {
+    fontSize: 15,
+    color: "#444",
+    fontWeight: "600",
+  },
+
+  value: {
+    fontSize: 15,
+    fontWeight: "700",
+    color: "#000",
+  },
+
+  description: {
+    fontSize: 14,
+    color: "#555",
+    marginBottom: 4,
+  },
+
+  descriptionFormula: {
+    fontSize: 13,
+    color: "#777",
+    marginBottom: 10,
+  },
 });
+
