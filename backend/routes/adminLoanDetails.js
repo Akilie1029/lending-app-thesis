@@ -9,14 +9,19 @@ const admin = require("../adminMiddleware");
 //      FULL LOAN DETAILS FOR BACKOFFICE ADMIN REVIEW
 // ===============================================================
 
+/**
+ * GET /api/admin/loan/:loanId/details
+ * - loanId kept as string (UUID) — do NOT Number() it
+ * - repayment_schedule query uses real table columns:
+ *    id, loan_id, day_number, expected_amount, due_date, status, paid_at
+ */
 router.get("/loan/:loanId/details", auth, admin, async (req, res) => {
   try {
-    // FIXED — UUID must remain a string
-    const loanId = req.params.loanId;
+    const loanId = req.params.loanId; // KEEP AS STRING (UUID)
 
-    // --------------------------
-    // 1. Get loan + borrower info
-    // --------------------------
+    console.log("🔎 AdminLoanDetails: fetching details for loanId =", loanId);
+
+    // 1) Loan + borrower info
     const loanQ = await db.query(
       `
       SELECT l.*,
@@ -32,30 +37,28 @@ router.get("/loan/:loanId/details", auth, admin, async (req, res) => {
     );
 
     if (loanQ.rows.length === 0) {
+      console.warn("⚠️ AdminLoanDetails: loan not found:", loanId);
       return res.status(404).json({ error: "Loan not found" });
     }
 
     const loan = loanQ.rows[0];
 
-    // --------------------------
-    // 2. Get repayment schedule
-    // --------------------------
+    // 2) Repayment schedule — using real column names (day_number, expected_amount, paid_at, status)
     const scheduleQ = await db.query(
       `
-      SELECT installment_number, amount_due, paid, due_date, overdue
+      SELECT id, loan_id, day_number, expected_amount, due_date, status, paid_at
       FROM repayment_schedule
       WHERE loan_id = $1
-      ORDER BY installment_number ASC
+      ORDER BY day_number ASC
       `,
       [loanId]
     );
 
-    // --------------------------
-    // 3. Get repayment history
-    // --------------------------
+    // 3) Repayment history — select conservative set of columns (adjust if your schema differs)
+    // If your table has extra columns (eg is_late_fee), you can add them here.
     const historyQ = await db.query(
       `
-      SELECT id, amount, created_at, is_late_fee
+      SELECT id, loan_id, amount, created_at
       FROM repayment_history
       WHERE loan_id = $1
       ORDER BY created_at DESC
@@ -63,9 +66,7 @@ router.get("/loan/:loanId/details", auth, admin, async (req, res) => {
       [loanId]
     );
 
-    // --------------------------
-    // 4. Get loan transactions
-    // --------------------------
+    // 4) Loan transactions — conservative column set (adjust if needed)
     const txQ = await db.query(
       `
       SELECT id, type, amount, payment_method, reference_no, created_at
@@ -76,16 +77,19 @@ router.get("/loan/:loanId/details", auth, admin, async (req, res) => {
       [loanId]
     );
 
-    res.json({
+    // 5) Return unified response
+    const payload = {
       loan,
       schedule: scheduleQ.rows,
       repayment_history: historyQ.rows,
       transactions: txQ.rows,
-    });
+    };
 
+    console.log("✅ AdminLoanDetails: returning payload for loanId:", loanId);
+    return res.json(payload);
   } catch (err) {
     console.error("❌ Admin Loan Details Error:", err);
-    res.status(500).json({ error: "Server error" });
+    return res.status(500).json({ error: "Server error" });
   }
 });
 
