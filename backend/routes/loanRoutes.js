@@ -5,7 +5,7 @@ const db = require("../db");
 const auth = require("../authMiddleware");
 
 // ===============================================================
-//  APPLY FOR LOAN (UPDATED TO MATCH FRONTEND FIELD NAMES)
+//  APPLY FOR LOAN  (FULLY FIXED VERSION)
 // ===============================================================
 router.post("/apply", auth, async (req, res) => {
   try {
@@ -25,22 +25,23 @@ router.post("/apply", auth, async (req, res) => {
       payout_method,
       payout_details,
 
-      // === UPDATED FIELD NAMES (from frontend) ===
-      valid_id_url,          // was government_id_url
-      selfie_id_url,         // was selfie_with_id_url
-      proof_income_url,      // was proof_of_funds_url
+      // 🌟 Correct field names from frontend
+      valid_id_url,
+      selfie_id_url,
+      proof_income_url,
 
-      // Local fallback
-      valid_id_local_uri,        // was government_id_local_uri
-      selfie_id_local_uri,       // was selfie_with_id_local_uri
-      proof_income_local_uri,    // was proof_of_funds_local_uri
+      // 🌟 Local fallback URIs (optional)
+      valid_id_local_uri,
+      selfie_id_local_uri,
+      proof_income_local_uri,
     } = req.body;
 
     if (!principal || !days || !purpose) {
       return res.status(400).json({ error: "Missing loan details" });
     }
 
-    // Insert loan
+    // 🌟 Insert loan into DB using your ACTUAL DATABASE COLUMN NAMES:
+    // gov_id_uri, selfie_id_uri, proof_uri
     const loanRes = await db.query(
       `
       INSERT INTO loans (
@@ -49,9 +50,9 @@ router.post("/apply", auth, async (req, res) => {
         principal, days, purpose,
         payout_method, payout_details,
 
-        /* UPDATED FIELD NAMES */
-        government_id_url, selfie_with_id_url, proof_of_funds_url,
-        government_id_local_uri, selfie_with_id_local_uri, proof_of_funds_local_uri,
+        -- REAL DATABASE COLUMNS
+        gov_id_uri, selfie_id_uri, proof_uri,
+        gov_id_local_uri, selfie_id_local_uri, proof_local_uri,
 
         status
       )
@@ -61,7 +62,6 @@ router.post("/apply", auth, async (req, res) => {
         $9,$10,$11,
         $12,$13,
 
-        /* MAP FRONTEND NAMES TO DATABASE COLUMNS */
         $14,$15,$16,
         $17,$18,$19,
 
@@ -84,12 +84,11 @@ router.post("/apply", auth, async (req, res) => {
         payout_method,
         payout_details,
 
-        // CLOUD URLs mapped to old DB column names
+        // 🌟 Mapped correctly
         valid_id_url,
         selfie_id_url,
         proof_income_url,
 
-        // LOCAL fallback URLs
         valid_id_local_uri,
         selfie_id_local_uri,
         proof_income_local_uri,
@@ -102,7 +101,7 @@ router.post("/apply", auth, async (req, res) => {
     });
   } catch (err) {
     console.error("❌ Loan Apply Error:", err);
-    res.status(500).json({ error: "Server error" });
+    return res.status(500).json({ error: "Server error" });
   }
 });
 
@@ -129,7 +128,8 @@ router.get("/my-latest", auth, async (req, res) => {
   try {
     const result = await db.query(
       `
-      SELECT * FROM loans
+      SELECT *
+      FROM loans
       WHERE user_id = $1
       ORDER BY created_at DESC
       LIMIT 1
