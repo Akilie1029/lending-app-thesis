@@ -11,7 +11,8 @@ const admin = require("../adminMiddleware");
 
 router.get("/loan/:loanId/details", auth, admin, async (req, res) => {
   try {
-    const loanId = Number(req.params.loanId);
+    // FIXED — UUID must remain a string
+    const loanId = req.params.loanId;
 
     // --------------------------
     // 1. Get loan + borrower info
@@ -75,9 +76,6 @@ router.get("/loan/:loanId/details", auth, admin, async (req, res) => {
       [loanId]
     );
 
-    // --------------------------
-    // 5. Build unified response
-    // --------------------------
     res.json({
       loan,
       schedule: scheduleQ.rows,
