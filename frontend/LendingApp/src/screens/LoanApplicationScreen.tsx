@@ -13,7 +13,6 @@ import {
   Image,
   FlatList,
   SafeAreaView,
-  Pressable,
 } from "react-native";
 import LinearGradient from "react-native-linear-gradient";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -21,6 +20,7 @@ import { launchImageLibrary } from "react-native-image-picker";
 import { Slider } from "@miblanchard/react-native-slider";
 import api from "../services/api";
 import { API_BASE } from "../config";
+import Icon from "react-native-vector-icons/Ionicons";
 
 type UploadFile = {
   uri: string;
@@ -101,9 +101,7 @@ export default function LoanApplicationScreen({ navigation }: any) {
     [duration, totalPayable]
   );
 
-  // --------------------------------------------------------------------
-  // PICK FILE HELPER
-  // --------------------------------------------------------------------
+  // ------------------------------ FILE PICKER ------------------------------
   const pickFile = async (setter: (f: UploadFile) => void) => {
     try {
       const res = await launchImageLibrary({
@@ -120,40 +118,33 @@ export default function LoanApplicationScreen({ navigation }: any) {
     }
   };
 
-  // --------------------------------------------------------------------
-// UPLOAD FILE TO BACKEND (Cloudinary via API)
-// --------------------------------------------------------------------
-const uploadDocument = async (uri: string, endpoint: string) => {
-  const form = new FormData();
-  form.append("file", {
-    uri,
-    type: "image/jpeg",
-    name: `upload_${Date.now()}.jpg`,
-  } as any);
+  // ------------------------------ FILE UPLOAD ------------------------------
+  const uploadDocument = async (uri: string, endpoint: string) => {
+    const form = new FormData();
+    form.append("file", {
+      uri,
+      type: "image/jpeg",
+      name: `upload_${Date.now()}.jpg`,
+    } as any);
 
-  const token = await AsyncStorage.getItem("userToken");
+    const token = await AsyncStorage.getItem("userToken");
 
-  const res = await fetch(`${API_BASE}${endpoint}`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "multipart/form-data",
-    },
-    body: form,
-  });
+    const res = await fetch(`${API_BASE}${endpoint}`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "multipart/form-data",
+      },
+      body: form,
+    });
 
-  const json = await res.json();
-  if (!res.ok) {
-    throw new Error(json.error || "Upload failed");
-  }
+    const json = await res.json();
+    if (!res.ok) throw new Error(json.error || "Upload failed");
 
-  return json; // contains { url, public_id }
-};
+    return json;
+  };
 
-
-  // --------------------------------------------------------------------
-  // DOB INPUT
-  // --------------------------------------------------------------------
+  // ------------------------------ DOB FIELD (RESTORED AGE VERIFICATION) ------------------------------
   const handleDobChange = (txt: string) => {
     let clean = txt.replace(/\D/g, "").slice(0, 8);
 
@@ -189,17 +180,13 @@ const uploadDocument = async (uri: string, endpoint: string) => {
     }
   };
 
-  // --------------------------------------------------------------------
-  // PHONE NUMBER
-  // --------------------------------------------------------------------
+  // ------------------------------ PHONE FIELD ------------------------------
   const handlePhoneChange = (t: string) => {
     const digits = t.replace(/\D/g, "").slice(0, 10);
     setPhone(digits);
   };
 
-  // --------------------------------------------------------------------
-  // MODAL HANDLING
-  // --------------------------------------------------------------------
+  // ------------------------------ MODAL ------------------------------
   const openModal = (type: "employment" | "income") => {
     setModalType(type);
     setModalVisible(true);
@@ -212,26 +199,24 @@ const uploadDocument = async (uri: string, endpoint: string) => {
     setModalType(null);
   };
 
-  // --------------------------------------------------------------------
-  // SUBMIT APPLICATION
-  // --------------------------------------------------------------------
+  // ------------------------------ SUBMIT APPLICATION ------------------------------
 const submitApplication = async () => {
-  if (!fullName || !dob || !address || phone.length < 10) {
-    Alert.alert("Missing Info", "Please complete all personal details.");
-    return;
-  }
-
-  if (!employment) return Alert.alert("Error", "Select employment status.");
-  if (!income) return Alert.alert("Error", "Select income range.");
-  if (!purpose) return Alert.alert("Error", "Enter loan purpose.");
-
-  if (!idFile || !selfieFile || !proofFile) {
-    return Alert.alert("Documents Missing", "All documents are required.");
-  }
-
-  setLoading(true);
-
   try {
+    if (!fullName || !dob || !address || phone.length < 10) {
+      Alert.alert("Missing Info", "Please complete all personal details.");
+      return;
+    }
+
+    if (!employment) return Alert.alert("Error", "Select employment status.");
+    if (!income) return Alert.alert("Error", "Select income range.");
+    if (!purpose) return Alert.alert("Error", "Enter loan purpose.");
+
+    if (!idFile || !selfieFile || !proofFile) {
+      return Alert.alert("Documents Missing", "All documents are required.");
+    }
+
+    setLoading(true);
+
     // 1️⃣ UPLOAD ID
     const idUpload = await uploadDocument(idFile.uri, "/upload/valid-id");
 
@@ -247,7 +232,7 @@ const submitApplication = async () => {
       "/upload/proof-income"
     );
 
-    // 4️⃣ SEND LOAN APPLICATION
+    // 4️⃣ BUILD PAYLOAD
     const payload = {
       full_name: fullName,
       date_of_birth: dob,
@@ -264,21 +249,48 @@ const submitApplication = async () => {
       payout_method: payoutMethod,
       payout_details: payoutDetails,
 
-      // URLs returned by backend upload routes
+      // Cloudinary URLs
       valid_id_url: idUpload.url,
       selfie_id_url: selfieUpload.url,
       proof_income_url: proofUpload.url,
     };
 
-    const res = await api.post("/loans/apply", payload);
+    // ⭐ DEBUG LOGS (Shows in Metro Terminal)
+    console.log("---- LOAN APPLICATION DEBUG ----");
+    console.log("POST URL:", `${API_BASE}/loans/apply`);
+    console.log("Payload:", payload);
 
+    // ⭐ RAW FETCH to capture HTML errors
+    const response = await fetch(`${API_BASE}/loans/apply`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${await AsyncStorage.getItem("userToken")}`,
+      },
+      body: JSON.stringify(payload),
+    });
+
+    // ⭐ Read raw text before parsing JSON
+    const text = await response.text();
+    console.log("Raw Response Text:", text);
+
+    let resJson;
+    try {
+      resJson = JSON.parse(text);
+    } catch (jsonErr) {
+      console.log("❌ JSON PARSE FAILED! Server returned HTML.");
+      console.log("Server Response:", text);
+      throw new Error("Server returned invalid JSON. Check Railway logs.");
+    }
+
+    // SUCCESS
     Alert.alert("Success", "Loan application submitted!", [
       {
         text: "OK",
         onPress: () =>
           navigation.reset({
             index: 0,
-            routes: [{ name: "Home" }],
+            routes: [{ name: "Drawer" }],
           }),
       },
     ]);
@@ -290,66 +302,18 @@ const submitApplication = async () => {
   }
 };
 
-  // --------------------------------------------------------------------
-  // MODAL RENDER
-  // --------------------------------------------------------------------
-  const renderModal = () => {
-    if (!modalType) return null;
 
-    const list = modalType === "employment" ? EMPLOYMENT_OPTIONS : INCOME_OPTIONS;
-
-    return (
-      <Modal visible={modalVisible} animationType="slide">
-        <SafeAreaView style={{ flex: 1 }}>
-          <View style={modalStyles.header}>
-            <TouchableOpacity onPress={() => setModalVisible(false)}>
-              <Text style={modalStyles.cancel}>Cancel</Text>
-            </TouchableOpacity>
-
-            <Text style={modalStyles.title}>
-              {modalType === "employment"
-                ? "Select Employment Status"
-                : "Select Monthly Income"}
-            </Text>
-
-            <View style={{ width: 60 }} />
-          </View>
-
-          <FlatList
-            data={list}
-            keyExtractor={(item) => item}
-            renderItem={({ item }) => (
-              <TouchableOpacity onPress={() => selectOption(item)}>
-                <View style={modalStyles.option}>
-                  <Text style={modalStyles.optionText}>{item}</Text>
-                </View>
-              </TouchableOpacity>
-            )}
-          />
-        </SafeAreaView>
-      </Modal>
-    );
-  };
-
-  // --------------------------------------------------------------------
-  // MAIN UI
-  // --------------------------------------------------------------------
+  // ------------------------------ MAIN UI ------------------------------
   return (
     <View style={styles.container}>
-      <LinearGradient colors={["#00AEEF", "#0087D1"]} style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.openDrawer()}>
-          <View style={styles.hamburger}>
-            <View style={styles.hamLine} />
-            <View style={styles.hamLine} />
-            <View style={styles.hamLine} />
-          </View>
+      {/* ---------------- HEADER: Back arrow, title ONLY (no subtitle) ---------------- */}
+      <View style={styles.header}>
+        <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
+          <Icon name="arrow-back" size={26} color="#fff" />
         </TouchableOpacity>
 
         <Text style={styles.headerTitle}>Apply for Loan</Text>
-        <Text style={styles.headerSubtitle}>
-          Choose amount & repayment days
-        </Text>
-      </LinearGradient>
+      </View>
 
       <ScrollView contentContainerStyle={styles.scroll}>
         {/* PERSONAL INFO */}
@@ -602,7 +566,36 @@ const submitApplication = async () => {
         <View style={{ height: 80 }} />
       </ScrollView>
 
-      {renderModal()}
+      {/* MODAL */}
+      <Modal visible={modalVisible} animationType="slide">
+        <SafeAreaView style={{ flex: 1 }}>
+          <View style={modalStyles.header}>
+            <TouchableOpacity onPress={() => setModalVisible(false)}>
+              <Text style={modalStyles.cancel}>Cancel</Text>
+            </TouchableOpacity>
+
+            <Text style={modalStyles.title}>
+              {modalType === "employment"
+                ? "Select Employment Status"
+                : "Select Monthly Income"}
+            </Text>
+
+            <View style={{ width: 60 }} />
+          </View>
+
+          <FlatList
+            data={modalType === "employment" ? EMPLOYMENT_OPTIONS : INCOME_OPTIONS}
+            keyExtractor={(item) => item}
+            renderItem={({ item }) => (
+              <TouchableOpacity onPress={() => selectOption(item)}>
+                <View style={modalStyles.option}>
+                  <Text style={modalStyles.optionText}>{item}</Text>
+                </View>
+              </TouchableOpacity>
+            )}
+          />
+        </SafeAreaView>
+      </Modal>
     </View>
   );
 }
@@ -632,25 +625,27 @@ const modalStyles = StyleSheet.create({
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#f6f7fb" },
 
+  /* FIXED HEADER */
   header: {
+    width: "100%",
+    backgroundColor: "#00AEEF",
     paddingTop: 50,
-    paddingBottom: 20,
-    paddingHorizontal: 20,
-    borderBottomLeftRadius: 16,
-    borderBottomRightRadius: 16,
+    paddingBottom: 18,
+    paddingHorizontal: 15,
+    flexDirection: "row",
+    alignItems: "center",
+    elevation: 4,
   },
 
-  hamburger: { marginBottom: 10 },
-  hamLine: {
-    width: 22,
-    height: 3,
-    backgroundColor: "#fff",
-    marginVertical: 2,
-    borderRadius: 2,
+  backBtn: {
+    marginRight: 10,
   },
 
-  headerTitle: { color: "#fff", fontSize: 24, fontWeight: "700" },
-  headerSubtitle: { color: "#eaf8ff", fontSize: 13, marginTop: 6 },
+  headerTitle: {
+    fontSize: 20,
+    fontWeight: "700",
+    color: "#fff",
+  },
 
   scroll: { padding: 16 },
 

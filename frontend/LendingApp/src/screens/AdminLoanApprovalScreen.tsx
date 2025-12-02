@@ -1,5 +1,5 @@
 // src/screens/AdminLoanApprovalScreen.tsx
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useState } from "react";
 import {
   View,
   Text,
@@ -7,43 +7,55 @@ import {
   FlatList,
   ActivityIndicator,
   TouchableOpacity,
+  RefreshControl,
   Alert,
 } from "react-native";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { format } from "date-fns";
+import { useFocusEffect } from "@react-navigation/native";
 import SmallHeader from "../components/SmallHeader";
 import api from "../services/api";
 
+const PRIMARY = "#169AF9";      // KAURta Blue
+const BG_LIGHT = "#F2F7FF";     // subtle light blue background
+
 export default function AdminLoanApprovalScreen({ navigation }: any) {
-  const [loading, setLoading] = useState(true);
   const [loans, setLoans] = useState<any[]>([]);
-  const [processing, setProcessing] = useState<Record<string, boolean>>({});
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [processing, setProcessing] = useState<Record<number, boolean>>({});
 
-  useEffect(() => {
-    loadLoans();
-  }, []);
-
-  // -------------------------------
-  // FETCH PENDING LOAN APPLICATIONS
-  // -------------------------------
+  // --------------------------------------------------
+  // Load Pending Loans
+  // --------------------------------------------------
   const loadLoans = async () => {
     try {
       setLoading(true);
-
-      const res = await api.get("/admin/pending-loans");
-      setLoans(Array.isArray(res.data) ? res.data : []);
-    } catch (err: any) {
+      const res = await api.get("/admin/pending");
+      setLoans(res.data || []);
+    } catch (err) {
       console.log("❌ Pending loans load error:", err?.response?.data || err);
       Alert.alert("Error", "Unable to load pending loan applications.");
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   };
 
-  // -------------------------------
-  // REJECT LOAN
-  // -------------------------------
-  const rejectLoan = (loanId: string) => {
+  useFocusEffect(
+    useCallback(() => {
+      loadLoans();
+    }, [])
+  );
+
+  const onRefresh = () => {
+    setRefreshing(true);
+    loadLoans();
+  };
+
+  // --------------------------------------------------
+  // Reject Loan
+  // --------------------------------------------------
+  const rejectLoan = (loanId: number) => {
     Alert.alert(
       "Reject Loan",
       "Are you sure you want to reject this application?",
@@ -55,11 +67,10 @@ export default function AdminLoanApprovalScreen({ navigation }: any) {
           onPress: async () => {
             try {
               setProcessing((p) => ({ ...p, [loanId]: true }));
-              await api.post(`/admin/loan/${loanId}/reject`, { note: "" });
-
+              await api.post(`/admin/reject/${loanId}`);
               setLoans((prev) => prev.filter((l) => l.id !== loanId));
-              Alert.alert("Rejected", "Loan application has been rejected.");
-            } catch (err: any) {
+              Alert.alert("Rejected", "Loan has been rejected.");
+            } catch (err) {
               console.log("❌ Reject error:", err?.response?.data || err);
               Alert.alert("Error", "Failed to reject loan.");
             } finally {
@@ -71,131 +82,224 @@ export default function AdminLoanApprovalScreen({ navigation }: any) {
     );
   };
 
-  // -------------------------------
-  // RENDER EACH LOAN
-  // -------------------------------
-  const renderLoan = ({ item }: { item: any }) => {
-    return (
-      <View style={styles.card}>
-        <View style={styles.row}>
-          <Text style={styles.name}>{item.full_name || "Borrower"}</Text>
-
-          <Text style={styles.amount}>
-            ₱ {Number(item.amount_requested ?? 0).toLocaleString()}
-          </Text>
-        </View>
-
-        <Text style={styles.purpose}>{item.purpose}</Text>
-
-        <View style={styles.metaRow}>
-          <Text style={styles.meta}>Term: {item.days ?? 0} days</Text>
-          <Text style={styles.meta}>
-            Applied:{" "}
-            {item.created_at
-              ? format(new Date(item.created_at), "MMM d, yyyy")
-              : "—"}
-          </Text>
-        </View>
-
-        <View style={styles.actions}>
-          {/* NEW: Go to Loan Review Screen */}
-          <TouchableOpacity
-            style={[styles.button, { backgroundColor: "#1E90FF" }]}
-            onPress={() =>
-              navigation.navigate("AdminLoanReviewScreen", {
-                loanId: item.id,
-              })
-            }
-          >
-            <Text style={styles.buttonText}>Review</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[styles.button, { backgroundColor: "#ff3b30" }]}
-            disabled={processing[item.id]}
-            onPress={() => rejectLoan(item.id)}
-          >
-            {processing[item.id] ? (
-              <ActivityIndicator color="#fff" />
-            ) : (
-              <Text style={styles.buttonText}>Reject</Text>
-            )}
-          </TouchableOpacity>
-        </View>
-      </View>
-    );
-  };
-
-  // -------------------------------
-  // RENDER MAIN SCREEN
-  // -------------------------------
-  if (loading) {
-    return (
-      <View style={styles.center}>
-        <SmallHeader title="Loan Approval" />
-        <ActivityIndicator size="large" color="#169AF9" />
-      </View>
-    );
-  }
-
-  if (loans.length === 0) {
-    return (
-      <View style={styles.center}>
-        <SmallHeader title="Loan Approval" />
-        <Text style={{ color: "#666", marginTop: 20 }}>
-          No pending loans at this time.
+  // --------------------------------------------------
+  // Card Renderer
+  // --------------------------------------------------
+  const renderLoan = ({ item }: { item: any }) => (
+    <View style={styles.card}>
+      <View style={styles.cardHeader}>
+        <Text style={styles.name}>{item.full_name}</Text>
+        <Text style={styles.amount}>
+          ₱ {Number(item.principal ?? 0).toLocaleString()}
         </Text>
       </View>
+
+      <Text style={styles.purpose}>{item.purpose}</Text>
+
+      <View style={styles.metaRow}>
+        <Text style={styles.metaLabel}>Term</Text>
+        <Text style={styles.metaValue}>{item.days} days</Text>
+      </View>
+
+      <View style={styles.metaRow}>
+        <Text style={styles.metaLabel}>Applied</Text>
+        <Text style={styles.metaValue}>
+          {item.created_at
+            ? format(new Date(item.created_at), "MMM d, yyyy")
+            : "—"}
+        </Text>
+      </View>
+
+      <View style={styles.actions}>
+        <TouchableOpacity
+          style={[styles.actionBtn, styles.reviewBtn]}
+          onPress={() =>
+            navigation.navigate("AdminLoanReviewScreen", {
+              loanId: item.id,
+            })
+          }
+        >
+          <Text style={styles.actionText}>Review</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.actionBtn, styles.rejectBtn]}
+          disabled={processing[item.id]}
+          onPress={() => rejectLoan(item.id)}
+        >
+          {processing[item.id] ? (
+            <ActivityIndicator color="#fff" />
+          ) : (
+            <Text style={styles.actionText}>Reject</Text>
+          )}
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+
+  // --------------------------------------------------
+  // Loading Screen
+  // --------------------------------------------------
+  if (loading) {
+    return (
+      <View style={styles.container}>
+        <SmallHeader title="Loan Approval" />
+        <View style={styles.loadingWrap}>
+          <ActivityIndicator size="large" color={PRIMARY} />
+        </View>
+      </View>
     );
   }
 
+  // --------------------------------------------------
+  // Empty State Screen (fixed to use KAURta colors)
+  // --------------------------------------------------
+  if (loans.length === 0) {
+    return (
+      <View style={styles.container}>
+        <SmallHeader title="Loan Approval" />
+
+        <View style={styles.emptyContainer}>
+          <Text style={styles.emptyText}>No pending loans at this time.</Text>
+        </View>
+      </View>
+    );
+  }
+
+  // --------------------------------------------------
+  // MAIN CONTENT
+  // --------------------------------------------------
   return (
-    <View style={{ flex: 1 }}>
+    <View style={styles.container}>
       <SmallHeader title="Loan Approval" />
 
       <FlatList
         data={loans}
         renderItem={renderLoan}
-        keyExtractor={(item) => item.id.toString()}
-        contentContainerStyle={{ padding: 12 }}
+        keyExtractor={(item) => String(item.id)}
+        contentContainerStyle={styles.listContainer}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+        }
       />
     </View>
   );
 }
 
+// =======================================================
+// ⭐ KAURta UI Styles
+// =======================================================
+
 const styles = StyleSheet.create({
-  center: { flex: 1, justifyContent: "center", alignItems: "center" },
+  container: {
+    flex: 1,
+    backgroundColor: BG_LIGHT,
+  },
+
+  loadingWrap: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+
+  listContainer: {
+    padding: 16,
+    paddingBottom: 140,
+  },
+
+  emptyContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: 24,
+  },
+
+  emptyText: {
+    color: "#7289A3",
+    fontSize: 15,
+    textAlign: "center",
+  },
 
   card: {
     backgroundColor: "#fff",
-    padding: 14,
-    borderRadius: 12,
+    padding: 18,
+    borderRadius: 18,
+    marginBottom: 16,
+    shadowColor: "#000",
+    shadowOpacity: 0.08,
+    shadowOffset: { width: 0, height: 4 },
+    shadowRadius: 8,
     elevation: 2,
-    marginVertical: 8,
-    borderWidth: 1.5,
-    borderColor: "#e0f0ff",
+    borderWidth: 1,
+    borderColor: "#D6E8FF",
   },
 
-  row: { flexDirection: "row", justifyContent: "space-between" },
-  name: { fontSize: 16, fontWeight: "700" },
-  amount: { fontSize: 17, fontWeight: "800", color: "#0071b2" },
+  cardHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginBottom: 6,
+  },
 
-  purpose: { marginTop: 6, color: "#444" },
+  name: {
+    fontSize: 17,
+    fontWeight: "700",
+    color: "#0A2A43",
+  },
+
+  amount: {
+    fontSize: 19,
+    fontWeight: "800",
+    color: PRIMARY,
+  },
+
+  purpose: {
+    marginTop: 5,
+    fontSize: 14,
+    color: "#4A5D73",
+    marginBottom: 12,
+  },
 
   metaRow: {
     flexDirection: "row",
-    marginTop: 6,
     justifyContent: "space-between",
+    paddingVertical: 2,
   },
-  meta: { fontSize: 12, color: "#666" },
 
-  actions: { flexDirection: "row", marginTop: 12 },
-  button: {
-    flex: 1,
-    paddingVertical: 10,
-    borderRadius: 10,
-    marginHorizontal: 6,
-    alignItems: "center",
+  metaLabel: {
+    fontSize: 13,
+    color: "#7289A3",
   },
-  buttonText: { color: "#fff", fontWeight: "700" },
+
+  metaValue: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: "#1A3C57",
+  },
+
+  actions: {
+    flexDirection: "row",
+    marginTop: 16,
+  },
+
+  actionBtn: {
+    flex: 1,
+    paddingVertical: 11,
+    borderRadius: 12,
+    alignItems: "center",
+    marginHorizontal: 6,
+  },
+
+  reviewBtn: {
+    backgroundColor: PRIMARY,
+  },
+
+  rejectBtn: {
+    backgroundColor: "#FF4D4F",
+  },
+
+  actionText: {
+    color: "#fff",
+    fontWeight: "700",
+    fontSize: 14,
+  },
 });

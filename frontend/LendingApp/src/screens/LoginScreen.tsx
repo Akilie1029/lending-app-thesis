@@ -38,44 +38,37 @@ const LoginScreen = ({ navigation }: LoginScreenProps) => {
     try {
       setLoading(true);
 
-      // NOTE:
-      // Backend JWT_SECRET is set to:
-      // "KaurtaSuperDuperStrongSecretPassword0123"
-      // This enables proper token signing during login.
       console.log("LOGIN → API_BASE:", API_BASE);
 
-      // 1) Login to get token
+      // 1) Login request
       const loginRes = await axios.post(`${API_BASE}/auth/login`, {
         email,
         password,
       });
 
       const token = loginRes.data?.token;
-      if (!token) {
-        throw new Error("No token returned from server.");
-      }
+      if (!token) throw new Error("No token returned from server.");
 
-      // Save token
+      // Store user token
       await AsyncStorage.setItem("userToken", token);
 
-      // 2) Fetch user details
+      // Fetch user details
       const meRes = await axios.get(`${API_BASE}/auth/me`, {
         headers: { Authorization: `Bearer ${token}` },
       });
 
       const me = meRes.data || {};
-
-      // Route based on role (case-insensitive)
       const role = (me.role || "").toString().toLowerCase();
+
       if (role === "admin") {
         navigation.reset({
           index: 0,
-          routes: [{ name: "AdminDrawer" as any }],
+          routes: [{ name: "AdminDrawer" }],
         });
       } else {
         navigation.reset({
           index: 0,
-          routes: [{ name: "Drawer" as any }],
+          routes: [{ name: "Drawer" }],
         });
       }
     } catch (error: any) {
@@ -110,7 +103,6 @@ const LoginScreen = ({ navigation }: LoginScreenProps) => {
         <View style={styles.formContainer}>
           <Text style={styles.title}>Welcome Back</Text>
 
-          {/* Email */}
           <TextInput
             style={styles.input}
             placeholder="Email Address"
@@ -121,7 +113,6 @@ const LoginScreen = ({ navigation }: LoginScreenProps) => {
             onChangeText={setEmail}
           />
 
-          {/* Password */}
           <TextInput
             style={styles.input}
             placeholder="Password"
@@ -131,7 +122,6 @@ const LoginScreen = ({ navigation }: LoginScreenProps) => {
             onChangeText={setPassword}
           />
 
-          {/* Login Button */}
           <TouchableOpacity style={styles.button} onPress={handleLogin} disabled={loading}>
             <Text style={styles.buttonText}>{loading ? "Logging in..." : "Login"}</Text>
           </TouchableOpacity>
@@ -139,9 +129,10 @@ const LoginScreen = ({ navigation }: LoginScreenProps) => {
           {/* Footer */}
           <Text style={styles.footerText}>Don’t have an account?</Text>
 
+          {/* ✅ FIXED: Correct navigation name */}
           <TouchableOpacity
             style={styles.signupButton}
-            onPress={() => navigation.navigate("Register" as any)}
+            onPress={() => navigation.navigate("Signup")}
           >
             <Text style={styles.signupButtonText}>Sign Up</Text>
           </TouchableOpacity>
@@ -153,19 +144,16 @@ const LoginScreen = ({ navigation }: LoginScreenProps) => {
 
 export default LoginScreen;
 
-// ...styles unchanged
-
+// STYLES (no changes)
 const styles = StyleSheet.create({
   gradientBackground: {
     flex: 1,
   },
-
   container: {
     flex: 1,
     alignItems: "center",
     justifyContent: "flex-start",
   },
-
   blueHeader: {
     width: "100%",
     height: height * 0.18,
@@ -175,7 +163,6 @@ const styles = StyleSheet.create({
     borderBottomRightRadius: scale(60),
     overflow: "hidden",
   },
-
   logoWrapper: {
     backgroundColor: "#FFFFFF",
     borderRadius: scale(60),
@@ -187,7 +174,6 @@ const styles = StyleSheet.create({
     position: "relative",
     marginTop: verticalScale(-40),
   },
-
   logo: {
     width: scale(230),
     height: verticalScale(180),
@@ -195,7 +181,6 @@ const styles = StyleSheet.create({
     marginHorizontal: scale(20),
     bottom: verticalScale(-30),
   },
-
   formContainer: {
     position: "absolute",
     bottom: verticalScale(20),
@@ -212,14 +197,12 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     shadowOffset: { width: 0, height: -2 },
   },
-
   title: {
     fontSize: moderateScale(26),
     fontWeight: "700",
     color: "#007BFF",
     marginBottom: verticalScale(30),
   },
-
   input: {
     width: "100%",
     height: verticalScale(50),
@@ -230,7 +213,6 @@ const styles = StyleSheet.create({
     marginBottom: verticalScale(16),
     fontSize: moderateScale(16),
   },
-
   button: {
     width: "50%",
     backgroundColor: "#0A9EFA",
@@ -241,19 +223,16 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: "#0367A6",
   },
-
   buttonText: {
     color: "#fff",
     fontSize: moderateScale(16),
     fontWeight: "700",
   },
-
   footerText: {
     marginTop: verticalScale(100),
     color: "#444",
     fontSize: moderateScale(14),
   },
-
   signupButton: {
     width: "40%",
     backgroundColor: "#0A9EFA",
@@ -264,7 +243,6 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: "#0367A6",
   },
-
   signupButtonText: {
     color: "#fff",
     fontSize: moderateScale(16),

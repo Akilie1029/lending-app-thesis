@@ -61,7 +61,7 @@ const SignupScreen = ({ navigation }: LoginScreenProps) => {
       Alert.alert("Success", "Account created successfully!", [
         {
           text: "OK",
-          onPress: () => navigation.reset({ index: 0, routes: [{ name: "Home" as any }] }),
+          onPress: () => navigation.reset({ index: 0, routes: [{ name: "Drawer" as any }] }),
         },
       ]);
     } catch (error: any) {

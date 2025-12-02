@@ -5,10 +5,12 @@ const db = require("../db");
 const auth = require("../authMiddleware");
 
 // ===============================================================
-//  APPLY FOR LOAN  (FULLY FIXED VERSION)
+//  APPLY FOR LOAN  (FINAL VERSION – ONLY CLOUDINARY FIELDS)
 // ===============================================================
 router.post("/apply", auth, async (req, res) => {
   try {
+    console.log("🚀 APPLY ROUTE — vFinal (Cloudinary Only)");
+
     const userId = req.user.id;
 
     const {
@@ -25,23 +27,19 @@ router.post("/apply", auth, async (req, res) => {
       payout_method,
       payout_details,
 
-      // 🌟 Correct field names from frontend
+      // Cloudinary URLs ONLY
       valid_id_url,
       selfie_id_url,
-      proof_income_url,
-
-      // 🌟 Local fallback URIs (optional)
-      valid_id_local_uri,
-      selfie_id_local_uri,
-      proof_income_local_uri,
+      proof_income_url
     } = req.body;
+
+    console.log("💾 Incoming Loan Payload:", req.body);
 
     if (!principal || !days || !purpose) {
       return res.status(400).json({ error: "Missing loan details" });
     }
 
-    // 🌟 Insert loan into DB using your ACTUAL DATABASE COLUMN NAMES:
-    // gov_id_uri, selfie_id_uri, proof_uri
+    // Insert into DB (MATCHES your actual column names)
     const loanRes = await db.query(
       `
       INSERT INTO loans (
@@ -50,9 +48,7 @@ router.post("/apply", auth, async (req, res) => {
         principal, days, purpose,
         payout_method, payout_details,
 
-        -- REAL DATABASE COLUMNS
         gov_id_uri, selfie_id_uri, proof_uri,
-        gov_id_local_uri, selfie_id_local_uri, proof_local_uri,
 
         status
       )
@@ -63,7 +59,6 @@ router.post("/apply", auth, async (req, res) => {
         $12,$13,
 
         $14,$15,$16,
-        $17,$18,$19,
 
         'pending'
       )
@@ -84,16 +79,14 @@ router.post("/apply", auth, async (req, res) => {
         payout_method,
         payout_details,
 
-        // 🌟 Mapped correctly
+        // final URLs
         valid_id_url,
         selfie_id_url,
-        proof_income_url,
-
-        valid_id_local_uri,
-        selfie_id_local_uri,
-        proof_income_local_uri,
+        proof_income_url
       ]
     );
+
+    console.log("✅ Loan INSERT Success:", loanRes.rows[0]);
 
     res.json({
       message: "Loan submitted successfully",
@@ -101,7 +94,7 @@ router.post("/apply", auth, async (req, res) => {
     });
   } catch (err) {
     console.error("❌ Loan Apply Error:", err);
-    return res.status(500).json({ error: "Server error" });
+    res.status(500).json({ error: "Server error" });
   }
 });
 
