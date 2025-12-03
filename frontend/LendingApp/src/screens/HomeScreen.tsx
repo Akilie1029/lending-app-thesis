@@ -1,5 +1,5 @@
 // src/screens/HomeScreen.tsx
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, useRef } from "react";
 import {
   View,
   Text,
@@ -7,6 +7,9 @@ import {
   TouchableOpacity,
   ScrollView,
   ActivityIndicator,
+  Image,
+  FlatList,
+  Dimensions,
 } from "react-native";
 import LinearGradient from "react-native-linear-gradient";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -15,12 +18,36 @@ import { useFocusEffect } from "@react-navigation/native";
 import { HomeScreenProps } from "../../App";
 import { API_BASE } from "../config";
 
+const { width: SCREEN_WIDTH } = Dimensions.get("window");
+
+// LOCAL BANNERS (use your 3 uploaded images)
+const BANNERS = [
+  require("../../assets/banners/banner1.jpg"),
+  require("../../assets/banners/banner2.jpg"),
+  require("../../assets/banners/banner3.jpg"),
+];
+
 const HomeScreen = ({ navigation }: HomeScreenProps) => {
   const [user, setUser] = useState<any>(null);
   const [transactions, setTransactions] = useState<any[]>([]);
   const [activeLoan, setActiveLoan] = useState<any>(null);
   const [latestLoan, setLatestLoan] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+
+  // Banner state
+  const [bannerIndex, setBannerIndex] = useState(0);
+  const bannerRef = useRef<FlatList>(null);
+
+  // 🔄 Auto-slide banners every 4 seconds
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const nextIndex = (bannerIndex + 1) % BANNERS.length;
+      setBannerIndex(nextIndex);
+      bannerRef.current?.scrollToIndex({ index: nextIndex, animated: true });
+    }, 4000);
+
+    return () => clearInterval(interval);
+  }, [bannerIndex]);
 
   const fetchData = async () => {
     try {
@@ -38,20 +65,9 @@ const HomeScreen = ({ navigation }: HomeScreenProps) => {
         axios.get(`${API_BASE}/loans/my-latest`, { headers }),
       ]);
 
-      console.log("📥 HOME FETCH RESPONSES →", {
-        user: userRes.data,
-        transactions: txRes.data,
-        activeLoan: activeLoanRes.data,
-        latestLoan: latestLoanRes.data,
-      });
-
-      // USER
       setUser(userRes.data);
-
-      // TRANSACTIONS
       setTransactions(txRes.data || []);
 
-      // ACTIVE LOAN NORMALIZATION
       const active =
         activeLoanRes.data?.loan ||
         activeLoanRes.data?.activeLoan ||
@@ -59,7 +75,6 @@ const HomeScreen = ({ navigation }: HomeScreenProps) => {
 
       setActiveLoan(active?.id ? active : null);
 
-      // LATEST LOAN (pending OR recently created)
       const latest =
         latestLoanRes.data?.latestLoan ||
         latestLoanRes.data?.loan ||
@@ -99,6 +114,7 @@ const HomeScreen = ({ navigation }: HomeScreenProps) => {
       style={styles.container}
       contentContainerStyle={{ paddingBottom: 40 }}
     >
+      {/* ================= HEADER ================= */}
       <LinearGradient colors={["#169AF9", "#37AAF2"]} style={styles.header}>
         <View style={styles.headerTopRow}>
           <TouchableOpacity
@@ -109,17 +125,18 @@ const HomeScreen = ({ navigation }: HomeScreenProps) => {
             <Text style={styles.headerSubtitle}>Welcome Back</Text>
             <Text style={styles.headerName}>{user?.full_name}</Text>
           </TouchableOpacity>
+
           <Text style={styles.bellIcon}>🔔</Text>
         </View>
       </LinearGradient>
 
-      {/* Balance Card */}
+
+      {/* ================= BALANCE CARD ================= */}
       <View style={styles.balanceCard}>
         {hasActiveLoan ? (
           <>
             <Text style={styles.dailyPaymentText}>
-              Daily Payment: ₱{" "}
-              {Number(activeLoan.daily_payment ?? 0).toLocaleString()}
+              Daily Payment: ₱ {Number(activeLoan.daily_payment ?? 0).toLocaleString()}
             </Text>
 
             <Text style={styles.dueDateText}>
@@ -161,7 +178,8 @@ const HomeScreen = ({ navigation }: HomeScreenProps) => {
         )}
       </View>
 
-      {/* Pending Loan Card */}
+
+      {/* ================= PENDING LOAN CARD ================= */}
       {hasPendingLoan && !hasActiveLoan && (
         <View style={styles.loanCard}>
           <View style={styles.loanRow}>
@@ -191,7 +209,7 @@ const HomeScreen = ({ navigation }: HomeScreenProps) => {
         </View>
       )}
 
-      {/* Active Loan Card */}
+      {/* ================= ACTIVE LOAN CARD ================= */}
       {hasActiveLoan && (
         <View style={styles.loanCard}>
           <View style={styles.loanRow}>
@@ -223,16 +241,16 @@ const HomeScreen = ({ navigation }: HomeScreenProps) => {
         </View>
       )}
 
-      {/* Recent Transactions */}
+
+
+      {/* ================= RECENT TRANSACTIONS ================= */}
       <View style={styles.sectionHeader}>
         <Text style={styles.sectionTitle}>Recent Transactions</Text>
       </View>
 
       <View style={styles.transactionsContainer}>
         {transactions.length === 0 ? (
-          <Text
-            style={{ textAlign: "center", color: "#999", padding: 10 }}
-          >
+          <Text style={{ textAlign: "center", color: "#999", padding: 10 }}>
             No recent transactions found
           </Text>
         ) : (
@@ -254,21 +272,95 @@ const HomeScreen = ({ navigation }: HomeScreenProps) => {
           ))
         )}
       </View>
+
+            {/* ================= BANNER SECTION ================= */}
+      <View style={styles.bannerContainer}>
+        <FlatList
+          ref={bannerRef}
+          data={BANNERS}
+          keyExtractor={(_, i) => i.toString()}
+          horizontal
+          pagingEnabled
+          showsHorizontalScrollIndicator={false}
+          onMomentumScrollEnd={(ev) => {
+            const index = Math.round(ev.nativeEvent.contentOffset.x / SCREEN_WIDTH);
+            setBannerIndex(index);
+          }}
+          renderItem={({ item }) => (
+            <Image source={item} style={styles.bannerImage} />
+          )}
+          style={{ width: SCREEN_WIDTH }}
+        />
+
+        {/* Dots Indicator */}
+        <View style={styles.dotsRow}>
+          {BANNERS.map((_, i) => (
+            <View
+              key={i}
+              style={[
+                styles.dot,
+                bannerIndex === i ? styles.dotActive : null,
+              ]}
+            />
+          ))}
+        </View>
+      </View>
     </ScrollView>
   );
+
+  
 };
+
+
 
 export default HomeScreen;
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#f6f7fb", marginTop: 20 },
-  header: { paddingHorizontal: 20, paddingVertical: 25, borderRadius: 25, marginHorizontal: 10 },
+
+  /* HEADER */
+  header: {
+    paddingHorizontal: 20,
+    paddingVertical: 25,
+    borderRadius: 25,
+    marginHorizontal: 10,
+  },
   headerTopRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   menuContainer: { flexDirection: "row", alignItems: "center" },
   menuIcon: { fontSize: 24, marginRight: 8, color: "#fff" },
   headerSubtitle: { fontSize: 20, color: "#fff", fontWeight: "500" },
   headerName: { fontSize: 28, fontWeight: "bold", color: "#fff", marginTop: 4, marginLeft: 25 },
   bellIcon: { fontSize: 22, color: "#fff" },
+
+  /* BANNER */
+  bannerContainer: {
+    width: SCREEN_WIDTH,
+    marginTop: 10,
+    marginBottom: 10,
+  },
+  bannerImage: {
+    width: SCREEN_WIDTH,
+    height: 160,
+    resizeMode: "cover",
+    borderRadius: 10,
+  },
+  dotsRow: {
+    flexDirection: "row",
+    justifyContent: "center",
+    marginTop: 6,
+  },
+  dot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: "#ccc",
+    marginHorizontal: 4,
+  },
+  dotActive: {
+    backgroundColor: "#169AF9",
+  },
+
+  /* BALANCE CARD */
   balanceCard: {
     backgroundColor: "#fff",
     marginHorizontal: 30,
@@ -298,6 +390,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   secondaryButtonText: { color: "#0A9EFA", fontWeight: "700" },
+
+  /* LOAN CARDS */
   sectionHeader: { marginTop: 25, marginHorizontal: 20 },
   sectionTitle: { fontSize: 18, fontWeight: "700", color: "#000" },
   loanCard: {
@@ -313,6 +407,8 @@ const styles = StyleSheet.create({
   loanRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   loanAmount: { fontSize: 20, fontWeight: "700", color: "#000" },
   loanAmountLabel: { color: "#666", fontSize: 12, marginTop: 2 },
+
+  /* TRANSACTIONS */
   transactionsContainer: {
     marginHorizontal: 20,
     marginTop: 10,
@@ -338,5 +434,6 @@ const styles = StyleSheet.create({
   transactionType: { fontSize: 16, fontWeight: "600", color: "#000" },
   transactionDate: { color: "#777", fontSize: 13 },
   transactionAmount: { fontSize: 16, fontWeight: "700", color: "#000" },
+
   loadingContainer: { flex: 1, justifyContent: "center", alignItems: "center" },
 });
