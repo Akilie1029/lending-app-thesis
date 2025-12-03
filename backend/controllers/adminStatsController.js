@@ -8,6 +8,8 @@ const num = (v) => {
   return Number.isNaN(n) ? 0 : n;
 };
 
+const LOG_PREFIX = "[ADMIN_STATS]";
+
 /**
  * GET /api/admin/dashboard-stats
  *
@@ -20,6 +22,11 @@ const num = (v) => {
  *  - payment behavior (on-time vs late for each of last 4 weeks)
  *  - cashflow (last 12 weeks)
  *
+ * Added: performance, portfolio, risk sections for RadialRings:
+ *  - performance: totalPayable, totalRepaid, percent
+ *  - portfolio: activePrincipal, totalPrincipalLent, percent
+ *  - risk: overdueAmount, activePortfolioBalance, percent
+ *
  * Notes:
  *  - Uses canonical repayment_schedule columns: day_number, expected_amount, due_date, status, paid_at
  *  - All date math uses Postgres intervals (server timezone)
@@ -27,7 +34,7 @@ const num = (v) => {
  */
 async function getDashboardStats(req, res) {
   try {
-    console.log("📊 getDashboardStats called by admin:", req.user?.id || "unknown");
+    console.log(LOG_PREFIX, "getDashboardStats called by admin:", req.user?.id || "unknown");
 
     // ---------------------------
     // 1) BASIC COUNTS
@@ -43,8 +50,8 @@ async function getDashboardStats(req, res) {
       db.query("SELECT COUNT(*)::int AS count FROM loans WHERE LOWER(status) = 'active'"),
       db.query("SELECT COUNT(*)::int AS count FROM loans WHERE LOWER(status) = 'rejected'"),
       db.query("SELECT COUNT(*)::int AS count FROM loans WHERE LOWER(status) = 'pending'"),
-      // >>> FIX: Only count loans that are truly READY for admin disbursement.
-      // We exclude intermediate states like 'approved_pending_disburse' which require borrower acceptance.
+      // Only count loans that are truly READY for admin disbursement.
+      // Exclude intermediate states like 'approved_pending_disburse' which require borrower acceptance.
       db.query(
         `
         SELECT COUNT(*)::int AS count FROM loans
@@ -72,15 +79,12 @@ async function getDashboardStats(req, res) {
     );
     const totalDisbursedLoan = num(totalDisbursedLoanRes.rows[0]?.total);
 
-    console.log("Counts:", { borrowerCount, activeLoanCount, rejectedCount, pendingLoanApproval, pendingDisbursement });
-    console.log("Total disbursed:", totalDisbursedLoan);
+    console.log(LOG_PREFIX, "Counts:", { borrowerCount, activeLoanCount, rejectedCount, pendingLoanApproval, pendingDisbursement });
+    console.log(LOG_PREFIX, "Total disbursed:", totalDisbursedLoan);
 
     // ---------------------------
     // 2) LOAN STATUS DISTRIBUTION
     // ---------------------------
-    // paid_amount: sum of disbursed amounts for loans with status 'paid' (or completed)
-    // unpaid_amount: sum of remaining_balance for loans with status 'active'
-    // overdue_amount: sum of remaining_balance for loans with status 'overdue'
     const loanDistRes = await db.query(
       `
       SELECT
@@ -94,6 +98,90 @@ async function getDashboardStats(req, res) {
     const paidAmount = num(loanDistRes.rows[0]?.paid_amount);
     const unpaidAmount = num(loanDistRes.rows[0]?.unpaid_amount);
     const overdueAmount = num(loanDistRes.rows[0]?.overdue_amount);
+
+    // ---------------------------
+    // NEW: PERFORMANCE (Total Repaid vs Total Payable)
+    // ---------------------------
+    // total_payable_sum: sum of total_payable for loans (only where total_payable present)
+    // total_repaid_sum: sum of transactions of type loan_payment / repayment
+    console.log(LOG_PREFIX, "Calculating performance metrics...");
+    const totalPayableRes = await db.query(
+      `
+      SELECT COALESCE(SUM(COALESCE(total_payable, 0)), 0) AS total_payable_sum
+      FROM loans
+      `
+    );
+    const totalRepaidRes = await db.query(
+      `
+      SELECT COALESCE(SUM(amount), 0) AS total_repaid_sum
+      FROM transactions
+      WHERE type IN ('loan_payment','repayment')
+      `
+    );
+
+    const totalPayableSum = num(totalPayableRes.rows[0]?.total_payable_sum);
+    const totalRepaidSum = num(totalRepaidRes.rows[0]?.total_repaid_sum);
+
+    const performancePercent = totalPayableSum === 0 ? 0 : Math.round((totalRepaidSum / totalPayableSum) * 100);
+
+    console.log(LOG_PREFIX, "Performance:", { totalPayableSum, totalRepaidSum, performancePercent });
+
+    // ---------------------------
+    // NEW: PORTFOLIO (Active Principal vs Total Principal Lent Out)
+    // ---------------------------
+    console.log(LOG_PREFIX, "Calculating portfolio metrics...");
+    // activePrincipal: principal currently active (status = 'active')
+    // totalPrincipalLent: sum of principal for loans that have been disbursed or are active/completed/overdue/paid
+    const activePrincipalRes = await db.query(
+      `
+      SELECT COALESCE(SUM(COALESCE(principal, disbursed_amount, 0)), 0) AS active_principal
+      FROM loans
+      WHERE LOWER(status) = 'active'
+      `
+    );
+
+    const totalPrincipalLentRes = await db.query(
+      `
+      SELECT COALESCE(SUM(COALESCE(disbursed_amount, principal, 0)), 0) AS total_principal_lent
+      FROM loans
+      WHERE disbursed_at IS NOT NULL
+         OR LOWER(status) IN ('active','completed','paid','overdue')
+      `
+    );
+
+    const activePrincipal = num(activePrincipalRes.rows[0]?.active_principal);
+    const totalPrincipalLent = num(totalPrincipalLentRes.rows[0]?.total_principal_lent);
+    const portfolioPercent = totalPrincipalLent === 0 ? 0 : Math.round((activePrincipal / totalPrincipalLent) * 100);
+
+    console.log(LOG_PREFIX, "Portfolio:", { activePrincipal, totalPrincipalLent, portfolioPercent });
+
+    // ---------------------------
+    // NEW: RISK (Overdue Amount vs Active Portfolio Balance)
+    // ---------------------------
+    console.log(LOG_PREFIX, "Calculating risk metrics...");
+    // overdueAmount: sum of remaining_balance where status = 'overdue'
+    // activePortfolioBalance: sum of remaining_balance for active + overdue (what's owed on currently live portfolio)
+    const overdueAmountRes = await db.query(
+      `
+      SELECT COALESCE(SUM(COALESCE(remaining_balance, 0)), 0) AS overdue_amount_sum
+      FROM loans
+      WHERE LOWER(status) = 'overdue'
+      `
+    );
+
+    const activePortfolioBalanceRes = await db.query(
+      `
+      SELECT COALESCE(SUM(COALESCE(remaining_balance, 0)), 0) AS active_portfolio_balance
+      FROM loans
+      WHERE LOWER(status) IN ('active','overdue')
+      `
+    );
+
+    const overdueAmountSum = num(overdueAmountRes.rows[0]?.overdue_amount_sum);
+    const activePortfolioBalance = num(activePortfolioBalanceRes.rows[0]?.active_portfolio_balance);
+    const riskPercent = activePortfolioBalance === 0 ? 0 : Math.round((overdueAmountSum / activePortfolioBalance) * 100);
+
+    console.log(LOG_PREFIX, "Risk:", { overdueAmountSum, activePortfolioBalance, riskPercent });
 
     // ---------------------------
     // 3) PAYMENT OVERVIEW (Last 4 Weeks)
@@ -236,10 +324,30 @@ async function getDashboardStats(req, res) {
       pendingDisbursement,
       totalDisbursedLoan,
 
+      // legacy loan status distribution (kept for backward compatibility)
       loanStatusDistribution: {
         paidAmount,
         unpaidAmount,
         overdueAmount,
+      },
+
+      // NEW: metrics for RadialRings (business-friendly)
+      performance: {
+        totalPayable: totalPayableSum,
+        totalRepaid: totalRepaidSum,
+        percent: performancePercent,
+      },
+
+      portfolio: {
+        activePrincipal,
+        totalPrincipal: totalPrincipalLent,
+        percent: portfolioPercent,
+      },
+
+      risk: {
+        overdueAmount: overdueAmountSum,
+        activePortfolioBalance,
+        percent: riskPercent,
       },
 
       paymentOverview4,
@@ -248,10 +356,10 @@ async function getDashboardStats(req, res) {
       cashflow,
     };
 
-    console.log("✅ getDashboardStats: payload prepared");
+    console.log(LOG_PREFIX, "✅ getDashboardStats: payload prepared");
     return res.json(payload);
   } catch (err) {
-    console.error("❌ getDashboardStats ERROR:", err);
+    console.error(LOG_PREFIX, "❌ getDashboardStats ERROR:", err);
     return res.status(500).json({ error: "Server error", details: err.message });
   }
 }
