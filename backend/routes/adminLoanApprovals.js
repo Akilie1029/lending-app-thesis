@@ -5,159 +5,44 @@ const db = require("../db");
 const auth = require("../authMiddleware");
 const admin = require("../adminMiddleware");
 
-/**
- * Robust ADMIN — Approve / Reject Loans (V2)
- *
- * This version ensures that when the repayment_schedule table contains
- * both the old columns (day_number, expected_amount, status, paid_at)
- * and the new columns (installment_number, amount_due, paid, overdue),
- * we insert values for *both* sets so NOT NULL constraints are satisfied.
- *
- * Also provides GET /pending to list pending loan applications for admin.
- */
+const LOG_PREFIX = "[ADMIN_APPROVAL]";
 
 // -----------------------------
-// Utility: generate schedule rows (logical model)
+// Utility: ensure loans table has approved_* and borrower_* columns
+// (defensive: will run only when missing columns are detected)
 // -----------------------------
-function generateSchedule(loan) {
-  const days = Number(loan.days || 0);
-  const daily = Number(loan.daily_payment || 0);
+async function ensureApprovedColumns(client) {
+  const colRes = await client.query(
+    `SELECT column_name FROM information_schema.columns WHERE table_name = 'loans'`
+  );
+  const existing = new Set(colRes.rows.map((r) => r.column_name));
 
-  const list = [];
-  const start = new Date();
-  start.setDate(start.getDate() + 1); // first due = tomorrow
+  const needed = [
+    { name: "approved_principal", sql: "approved_principal numeric NULL" },
+    { name: "approved_interest", sql: "approved_interest numeric NULL" },
+    { name: "approved_total_payable", sql: "approved_total_payable numeric NULL" },
+    { name: "approved_daily_payment", sql: "approved_daily_payment numeric NULL" },
+    { name: "borrower_accepted_at", sql: "borrower_accepted_at timestamp NULL" },
+    { name: "borrower_rejected_at", sql: "borrower_rejected_at timestamp NULL" },
+  ];
 
-  for (let i = 0; i < days; i++) {
-    const due = new Date(start.getTime() + i * 24 * 60 * 60 * 1000);
-    list.push({
-      loan_id: loan.id,
-      installment_number: i + 1,
-      day_number: i + 1, // for older schema compatibility
-      amount_due: daily,
-      expected_amount: daily, // older schema compatibility
-      due_date: due.toISOString(),
-      paid: false,
-      overdue: false,
-      status: "pending",
-      paid_at: null,
-    });
+  const toAdd = needed.filter((n) => !existing.has(n.name));
+  if (toAdd.length === 0) {
+    console.log(LOG_PREFIX, "approved_* and borrower_* columns present - no ALTER needed");
+    return;
   }
 
-  return list;
+  console.log(LOG_PREFIX, "Missing columns detected:", toAdd.map((t) => t.name).join(", "));
+  const alterSql = "ALTER TABLE loans " + toAdd.map((t) => `ADD COLUMN ${t.sql}`).join(", ");
+
+  console.log(LOG_PREFIX, "Executing ALTER TABLE to add missing columns");
+  await client.query(alterSql);
+  console.log(LOG_PREFIX, "ALTER TABLE complete, columns added:", toAdd.map((t) => t.name).join(", "));
 }
 
 // -----------------------------
-// Helper: get columns present in repayment_schedule as a Set
-// -----------------------------
-async function getRepaymentScheduleColumns(client) {
-  const q = await client.query(
-    `SELECT column_name FROM information_schema.columns WHERE table_name='repayment_schedule'`
-  );
-  return new Set(q.rows.map((r) => r.column_name));
-}
-
-// -----------------------------
-// Helper: build insert SQL & values array depending on columnsPresent
-// -----------------------------
-function buildInsertForScheduleRows(rows, columnsPresent) {
-  if (!rows || rows.length === 0) return { sql: null, values: [] };
-
-  // Build an array of columns to insert.
-  // IMPORTANT: If both old + new exist, include both.
-  const insertCols = ["loan_id"];
-
-  // numeric installment/day: include both if present
-  if (columnsPresent.has("installment_number")) insertCols.push("installment_number");
-  if (columnsPresent.has("day_number")) insertCols.push("day_number");
-
-  // amounts: include both if present
-  if (columnsPresent.has("amount_due")) insertCols.push("amount_due");
-  if (columnsPresent.has("expected_amount")) insertCols.push("expected_amount");
-
-  // due_date (commonly present)
-  if (columnsPresent.has("due_date")) insertCols.push("due_date");
-
-  // paid / status / paid_at / overdue mixture:
-  // include paid and overdue (new) if present
-  if (columnsPresent.has("paid")) insertCols.push("paid");
-  if (columnsPresent.has("overdue")) insertCols.push("overdue");
-
-  // include status and paid_at (old) if present
-  if (columnsPresent.has("status")) insertCols.push("status");
-  if (columnsPresent.has("paid_at")) insertCols.push("paid_at");
-
-  // Remove potential duplicates
-  const uniqueCols = Array.from(new Set(insertCols));
-
-  // Build placeholders and values
-  const placeholders = [];
-  const values = [];
-
-  rows.forEach((r, rowIdx) => {
-    const rowPlaceholders = [];
-
-    uniqueCols.forEach((col, colIdx) => {
-      rowPlaceholders.push(`$${rowIdx * uniqueCols.length + colIdx + 1}`);
-
-      switch (col) {
-        case "loan_id":
-          values.push(r.loan_id);
-          break;
-        case "installment_number":
-          values.push(r.installment_number ?? r.day_number ?? null);
-          break;
-        case "day_number":
-          values.push(r.day_number ?? r.installment_number ?? null);
-          break;
-        case "amount_due":
-          values.push(
-            typeof r.amount_due !== "undefined"
-              ? r.amount_due
-              : r.expected_amount ?? null
-          );
-          break;
-        case "expected_amount":
-          values.push(
-            typeof r.expected_amount !== "undefined"
-              ? r.expected_amount
-              : r.amount_due ?? null
-          );
-          break;
-        case "due_date":
-          values.push(r.due_date);
-          break;
-        case "paid":
-          values.push(r.paid ? true : false);
-          break;
-        case "overdue":
-          values.push(r.overdue ? true : false);
-          break;
-        case "status":
-          values.push(r.status ?? "pending");
-          break;
-        case "paid_at":
-          values.push(r.paid_at ?? null);
-          break;
-        default:
-          values.push(null);
-      }
-    });
-
-    placeholders.push(`(${rowPlaceholders.join(", ")})`);
-  });
-
-  const sql = `
-    INSERT INTO repayment_schedule (${uniqueCols.join(", ")})
-    VALUES ${placeholders.join(", ")}
-  `;
-
-  return { sql, values };
-}
-
-// ============================================================
 // GET PENDING LOANS
-// ============================================================
-// Returns pending loans for admin review
+// -----------------------------
 router.get("/pending", auth, admin, async (req, res) => {
   try {
     const q = await db.query(
@@ -169,6 +54,7 @@ router.get("/pending", auth, admin, async (req, res) => {
         u.email AS borrower_email,
         l.phone_number AS borrower_phone,
         l.principal,
+        l.amount_requested,
         l.total_payable,
         l.daily_payment,
         l.days,
@@ -188,143 +74,145 @@ router.get("/pending", auth, admin, async (req, res) => {
 
     return res.json(q.rows || []);
   } catch (err) {
-    console.error("❌ Admin pending loans error:", err);
+    console.error(LOG_PREFIX, "Admin pending loans error:", err);
     return res.status(500).json({ error: "Server error", details: err.message });
   }
 });
 
 // ============================================================
-// APPROVE LOAN - robust variant
+// APPROVE LOAN (admin sets approved amount) - UPDATED BEHAVIOUR
+//
+// Expects in req.body: { approved_principal }
+// Validates approved_principal <= original principal (or amount_requested)
+// Computes approved_interest (20%), approved_total_payable, approved_daily_payment
+// Updates loans table with approved_* fields and sets status = 'approved_pending_disburse'
+// Does NOT create repayment schedule or disburse.
 // ============================================================
 router.post("/approve/:loanId", auth, admin, async (req, res) => {
   const loanId = req.params.loanId;
-  const approveAndDisburse =
-    req.body && typeof req.body.approveAndDisburse !== "undefined"
-      ? req.body.approveAndDisburse
-      : false;
+  const rawApproved = req.body?.approved_principal;
 
-  console.log("\n\n🔥 [ADMIN] Approve request:", {
-    loanId,
-    approveAndDisburse,
-    user: req.user?.id,
-  });
+  console.log(LOG_PREFIX, "Approve request received:", { loanId, adminId: req.user?.id });
 
   const client = await db.connect();
   try {
     await client.query("BEGIN");
 
-    console.log("STEP: Fetching loan for update:", loanId);
-    const loanQ = await client.query(
-      `SELECT * FROM loans WHERE id = $1 LIMIT 1 FOR UPDATE`,
-      [loanId]
-    );
+    // Ensure DB has required columns (defensive)
+    await ensureApprovedColumns(client);
+
+    // Fetch loan FOR UPDATE
+    console.log(LOG_PREFIX, "Fetching loan record (FOR UPDATE):", loanId);
+    const loanQ = await client.query(`SELECT * FROM loans WHERE id = $1 LIMIT 1 FOR UPDATE`, [
+      loanId,
+    ]);
     if (loanQ.rows.length === 0) {
       await client.query("ROLLBACK");
-      console.warn("⚠️ Loan not found:", loanId);
+      console.warn(LOG_PREFIX, "Loan not found:", loanId);
       return res.status(404).json({ error: "Loan not found" });
     }
+
     const loan = loanQ.rows[0];
 
     if ((loan.status || "").toLowerCase() !== "pending") {
       await client.query("ROLLBACK");
-      console.warn("⚠️ Loan is not pending:", loanId, "status:", loan.status);
-      return res
-        .status(400)
-        .json({ error: "Loan is not pending", currentStatus: loan.status });
+      console.warn(LOG_PREFIX, "Loan not pending:", loanId, "status:", loan.status);
+      return res.status(400).json({ error: "Loan is not pending", currentStatus: loan.status });
     }
 
-    // Ensure total_payable and daily_payment are numbers (defensive)
-    const totalPayable = Number(loan.total_payable || 0);
-    const days = Number(loan.days || 0);
-    const dailyPaymentComputed =
-      days > 0 ? Number((totalPayable / days).toFixed(2)) : Number(loan.daily_payment || 0);
+    // Validate approved_principal provided
+    if (typeof rawApproved === "undefined" || rawApproved === null) {
+      await client.query("ROLLBACK");
+      return res.status(400).json({ error: "approved_principal is required" });
+    }
 
-    console.log("STEP: Marking loan approved at ", new Date().toISOString());
+    const approved_principal = Number(rawApproved);
+    if (Number.isNaN(approved_principal) || approved_principal <= 0) {
+      await client.query("ROLLBACK");
+      return res.status(400).json({ error: "Invalid approved_principal" });
+    }
+
+    // Determine original requested principal (use amount_requested if present, else principal)
+    const original_principal = Number(loan.amount_requested ?? loan.principal ?? 0);
+
+    // Ensure admin cannot approve an amount higher than requested/original principal
+    if (approved_principal > original_principal) {
+      await client.query("ROLLBACK");
+      console.warn(
+        LOG_PREFIX,
+        "Approved principal greater than original principal:",
+        approved_principal,
+        original_principal
+      );
+      return res.status(400).json({
+        error: "APPROVED_EXCEEDS_REQUESTED",
+        message: "approved_principal cannot be greater than the requested principal",
+      });
+    }
+
+    // Compute approved interest (20% of approved principal)
+    const approved_interest = Number((approved_principal * 0.2).toFixed(2));
+
+    // Determine repayment days (fallback to loan.days)
+    const days = Number(loan.days || 0);
+
+    const approved_total_payable = Number((approved_principal + approved_interest).toFixed(2));
+    const approved_daily_payment =
+      days > 0 ? Number((approved_total_payable / days).toFixed(2)) : Number(approved_total_payable);
+
+    console.log(LOG_PREFIX, "Computed approved values:", {
+      approved_principal,
+      approved_interest,
+      approved_total_payable,
+      approved_daily_payment,
+      days,
+    });
+
+    // Update the loan: set approved_* values and set status to approved_pending_disburse
+    const now = new Date().toISOString();
+
     await client.query(
       `
       UPDATE loans
-      SET status = 'approved',
-          approved_at = $1,
-          total_payable = $2,
-          daily_payment = $3
-      WHERE id = $4
+      SET
+        approved_principal = $1,
+        approved_interest = $2,
+        approved_total_payable = $3,
+        approved_daily_payment = $4,
+        approved_at = $5,
+        status = 'approved_pending_disburse'
+      WHERE id = $6
       `,
-      [new Date().toISOString(), totalPayable, dailyPaymentComputed, loanId]
+      [
+        approved_principal,
+        approved_interest,
+        approved_total_payable,
+        approved_daily_payment,
+        now,
+        loanId,
+      ]
     );
-
-    // Generate logical schedule rows
-    console.log("STEP: Generating logical schedule rows");
-    const scheduleRows = generateSchedule({
-      id: loan.id,
-      days: loan.days,
-      daily_payment: loan.daily_payment || dailyPaymentComputed,
-    });
-
-    console.log("Generated scheduleRows:", scheduleRows.length);
-
-    // Determine columns present
-    const columnsPresent = await getRepaymentScheduleColumns(client);
-    console.log(
-      "repayment_schedule columns present:",
-      Array.from(columnsPresent).join(", ")
-    );
-
-    // Build SQL & vals based on present columns
-    const { sql, values } = buildInsertForScheduleRows(scheduleRows, columnsPresent);
-
-    if (sql) {
-      console.log("STEP: Inserting repayment_schedule rows");
-      console.log("SQL preview (truncated):", sql.replace(/\s+/g, " ").slice(0, 400));
-      await client.query(sql, values);
-      console.log("Inserted schedule rows successfully.");
-    } else {
-      console.log(
-        "No insert executed: repayment_schedule table appears to be missing expected columns."
-      );
-    }
-
-    // Optional disbursement handling
-    if (approveAndDisburse) {
-      console.log("STEP: approveAndDisburse true -> performing disbursement actions");
-      const now = new Date().toISOString();
-
-      await client.query(
-        `
-        INSERT INTO transactions (user_id, loan_id, type, amount, payment_method, created_at)
-        VALUES ($1, $2, 'loan_disbursement', $3, $4, $5)
-        `,
-        [loan.user_id, loanId, loan.principal, loan.payout_method || "bank", now]
-      );
-
-      await client.query(
-        `
-        UPDATE loans
-        SET status = 'active',
-            disbursed_at = $1,
-            remaining_balance = $2
-        WHERE id = $3
-        `,
-        [now, loan.total_payable || 0, loanId]
-      );
-
-      console.log("Disbursement completed for loan:", loanId);
-    }
 
     await client.query("COMMIT");
-    console.log("🎉 Loan approved and schedule created. Commit complete.");
 
+    console.log(LOG_PREFIX, "Loan approved (pending borrower acceptance):", loanId);
+
+    // Return sanitized loan summary for admin UI and for borrower notification
     return res.json({
-      message: "Loan approved",
+      message: "Loan approved (awaiting borrower acceptance)",
       loanId,
-      scheduleCount: scheduleRows.length,
-      approveAndDisburse: !!approveAndDisburse,
+      approved_principal,
+      approved_interest,
+      approved_total_payable,
+      approved_daily_payment,
+      approved_at: now,
     });
   } catch (err) {
-    console.error("❌ Approve loan error:", err);
+    console.error(LOG_PREFIX, "Approve loan error:", err);
     try {
       await client.query("ROLLBACK");
-    } catch (rb) {
-      console.error("❌ Rollback error:", rb);
+    } catch (rbErr) {
+      console.error(LOG_PREFIX, "Rollback error:", rbErr);
     }
     return res.status(500).json({ error: "Server error", details: err.message });
   } finally {
@@ -343,10 +231,10 @@ router.post("/reject/:loanId", auth, admin, async (req, res) => {
       now,
       loanId,
     ]);
-    console.log("Loan rejected:", loanId);
+    console.log(LOG_PREFIX, "Loan rejected by admin:", loanId);
     return res.json({ message: "Loan rejected", loanId });
   } catch (err) {
-    console.error("❌ Reject error:", err);
+    console.error(LOG_PREFIX, "Reject error:", err);
     return res.status(500).json({ error: "Server error", details: err.message });
   }
 });
