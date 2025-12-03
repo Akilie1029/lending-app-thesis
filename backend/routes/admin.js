@@ -20,9 +20,9 @@ const { getAllPayments } = require("../controllers/adminPaymentsController");
  *  - Get User Loans
  *  - Get User Transactions
  *  - Force Complete Loan
+ *  - Server Health Check
  *
- * All IDs are UUID strings.
- * Includes debug logs for tracing backend behavior.
+ * Includes safe UUID handling and detailed debug logging.
  */
 
 // ===============================================================
@@ -96,11 +96,6 @@ router.get("/users/search", auth, admin, async (req, res) => {
 router.get("/user/:userId", auth, admin, async (req, res) => {
   try {
     const userId = req.params.userId;
-
-    if (!userId) {
-      console.warn("⚠️ Missing userId");
-      return res.status(400).json({ error: "userId is required" });
-    }
 
     console.log(`👤 [ADMIN] get user details userId=${userId}`);
 
@@ -181,8 +176,6 @@ router.post("/loan/:loanId/force-complete", auth, admin, async (req, res) => {
     const loanId = req.params.loanId;
     console.log(`⚠️ [ADMIN] force-complete loanId=${loanId}`);
 
-    if (!loanId) return res.status(400).json({ error: "loanId is required" });
-
     const loanRes = await db.query(`SELECT * FROM loans WHERE id = $1`, [loanId]);
     if (loanRes.rows.length === 0) {
       return res.status(404).json({ error: "Loan not found" });
@@ -191,7 +184,6 @@ router.post("/loan/:loanId/force-complete", auth, admin, async (req, res) => {
     const loan = loanRes.rows[0];
 
     if (loan.status === "completed") {
-      console.log(`ℹ️ Loan already completed loanId=${loanId}`);
       return res.json({ message: "Loan already completed" });
     }
 
@@ -206,12 +198,44 @@ router.post("/loan/:loanId/force-complete", auth, admin, async (req, res) => {
       [loanId]
     );
 
-    console.log(`✅ Loan force-completed loanId=${loanId}`);
-
     return res.json({ message: "Loan force-completed", loanId });
   } catch (err) {
     console.error("❌ admin force-complete ERROR:", err);
     return res.status(500).json({ error: "Server error", details: err.message });
+  }
+});
+
+// ===============================================================
+//                     ADMIN HEALTH CHECK
+// ===============================================================
+router.get("/health", auth, admin, async (req, res) => {
+  const start = Date.now();
+
+  try {
+    // DB ping
+    await db.query("SELECT 1");
+    const latency = Date.now() - start;
+
+    let dbStatus = "connected";
+    if (latency >= 1000) dbStatus = "slow";
+
+    return res.json({
+      api: "online",
+      database: dbStatus,
+      latency_ms: latency,
+      timestamp: new Date().toISOString(),
+    });
+
+  } catch (err) {
+    console.error("❌ [ADMIN] Health check failed:", err);
+
+    return res.status(500).json({
+      api: "online",
+      database: "error",
+      latency_ms: null,
+      error: err.message,
+      timestamp: new Date().toISOString(),
+    });
   }
 });
 
