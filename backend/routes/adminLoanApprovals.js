@@ -8,9 +8,12 @@ const admin = require("../adminMiddleware");
 /**
  * Robust ADMIN — Approve / Reject Loans (V2)
  *
- * Includes:
- *  - GET /pending WITH JOIN to users → so admin sees borrower name
- *  - Safe flexible repayment schedule generator
+ * This version ensures that when the repayment_schedule table contains
+ * both the old columns (day_number, expected_amount, status, paid_at)
+ * and the new columns (installment_number, amount_due, paid, overdue),
+ * we insert values for *both* sets so NOT NULL constraints are satisfied.
+ *
+ * Also provides GET /pending to list pending loan applications for admin.
  */
 
 // -----------------------------
@@ -29,9 +32,9 @@ function generateSchedule(loan) {
     list.push({
       loan_id: loan.id,
       installment_number: i + 1,
-      day_number: i + 1,
+      day_number: i + 1, // for older schema compatibility
       amount_due: daily,
-      expected_amount: daily,
+      expected_amount: daily, // older schema compatibility
       due_date: due.toISOString(),
       paid: false,
       overdue: false,
@@ -44,7 +47,7 @@ function generateSchedule(loan) {
 }
 
 // -----------------------------
-// Helper: get columns present
+// Helper: get columns present in repayment_schedule as a Set
 // -----------------------------
 async function getRepaymentScheduleColumns(client) {
   const q = await client.query(
@@ -54,7 +57,7 @@ async function getRepaymentScheduleColumns(client) {
 }
 
 // -----------------------------
-// Helper: build SQL insertion
+// Helper: build insert SQL & values array depending on columnsPresent
 // -----------------------------
 function buildInsertForScheduleRows(rows, columnsPresent) {
   if (!rows || rows.length === 0) return { sql: null, values: [] };
@@ -90,8 +93,8 @@ function buildInsertForScheduleRows(rows, columnsPresent) {
         case "loan_id": values.push(r.loan_id); break;
         case "installment_number": values.push(r.installment_number ?? r.day_number ?? null); break;
         case "day_number": values.push(r.day_number ?? r.installment_number ?? null); break;
-        case "amount_due": values.push(r.amount_due ?? r.expected_amount ?? null); break;
-        case "expected_amount": values.push(r.expected_amount ?? r.amount_due ?? null); break;
+        case "amount_due": values.push(typeof r.amount_due !== "undefined" ? r.amount_due : r.expected_amount ?? null); break;
+        case "expected_amount": values.push(typeof r.expected_amount !== "undefined" ? r.expected_amount : r.amount_due ?? null); break;
         case "due_date": values.push(r.due_date); break;
         case "paid": values.push(r.paid ? true : false); break;
         case "overdue": values.push(r.overdue ? true : false); break;
@@ -113,7 +116,7 @@ function buildInsertForScheduleRows(rows, columnsPresent) {
 }
 
 // ============================================================
-// ✅ FIXED: GET PENDING LOANS (now includes borrower name)
+// GET PENDING LOANS  **UPDATED WITH JOIN USERS**
 // ============================================================
 router.get("/pending", auth, admin, async (req, res) => {
   try {
@@ -124,7 +127,7 @@ router.get("/pending", auth, admin, async (req, res) => {
         l.user_id,
         u.full_name AS borrower_name,
         u.email AS borrower_email,
-        u.phone AS borrower_phone,
+        u.phone_number AS borrower_phone,
         l.principal,
         l.total_payable,
         l.daily_payment,
@@ -151,7 +154,7 @@ router.get("/pending", auth, admin, async (req, res) => {
 });
 
 // ============================================================
-// APPROVE LOAN — unchanged logic below
+// APPROVE LOAN - robust variant
 // ============================================================
 router.post("/approve/:loanId", auth, admin, async (req, res) => {
   const loanId = req.params.loanId;
@@ -170,20 +173,24 @@ router.post("/approve/:loanId", auth, admin, async (req, res) => {
   try {
     await client.query("BEGIN");
 
+    console.log("STEP: Fetching loan for update:", loanId);
     const loanQ = await client.query(
       `SELECT * FROM loans WHERE id = $1 LIMIT 1 FOR UPDATE`,
       [loanId]
     );
     if (loanQ.rows.length === 0) {
       await client.query("ROLLBACK");
+      console.warn("⚠️ Loan not found:", loanId);
       return res.status(404).json({ error: "Loan not found" });
     }
-
     const loan = loanQ.rows[0];
 
     if ((loan.status || "").toLowerCase() !== "pending") {
       await client.query("ROLLBACK");
-      return res.status(400).json({ error: "Loan is not pending" });
+      console.warn("⚠️ Loan is not pending:", loanId, "status:", loan.status);
+      return res
+        .status(400)
+        .json({ error: "Loan is not pending", currentStatus: loan.status });
     }
 
     const totalPayable = Number(loan.total_payable || 0);
@@ -191,6 +198,7 @@ router.post("/approve/:loanId", auth, admin, async (req, res) => {
     const dailyPaymentComputed =
       days > 0 ? Number((totalPayable / days).toFixed(2)) : Number(loan.daily_payment || 0);
 
+    console.log("STEP: Marking loan approved at ", new Date().toISOString());
     await client.query(
       `
       UPDATE loans
@@ -203,6 +211,7 @@ router.post("/approve/:loanId", auth, admin, async (req, res) => {
       [new Date().toISOString(), totalPayable, dailyPaymentComputed, loanId]
     );
 
+    console.log("STEP: Generating logical schedule rows");
     const scheduleRows = generateSchedule({
       id: loan.id,
       days: loan.days,
@@ -212,7 +221,10 @@ router.post("/approve/:loanId", auth, admin, async (req, res) => {
     const columnsPresent = await getRepaymentScheduleColumns(client);
     const { sql, values } = buildInsertForScheduleRows(scheduleRows, columnsPresent);
 
-    if (sql) await client.query(sql, values);
+    if (sql) {
+      console.log("STEP: Inserting repayment_schedule rows");
+      await client.query(sql, values);
+    }
 
     if (approveAndDisburse) {
       const now = new Date().toISOString();
@@ -243,11 +255,11 @@ router.post("/approve/:loanId", auth, admin, async (req, res) => {
       message: "Loan approved",
       loanId,
       scheduleCount: scheduleRows.length,
-      approveAndDisburse,
+      approveAndDisburse: !!approveAndDisburse,
     });
   } catch (err) {
     console.error("❌ Approve loan error:", err);
-    await client.query("ROLLBACK");
+    await client.query("ROLLBACK").catch(() => {});
     return res.status(500).json({ error: "Server error", details: err.message });
   } finally {
     client.release();
@@ -255,18 +267,16 @@ router.post("/approve/:loanId", auth, admin, async (req, res) => {
 });
 
 // ============================================================
-// REJECT LOAN
+// REJECT route
 // ============================================================
 router.post("/reject/:loanId", auth, admin, async (req, res) => {
   const loanId = req.params.loanId;
-
   try {
     const now = new Date().toISOString();
     await db.query(
       `UPDATE loans SET status = 'rejected', rejected_at = $1 WHERE id = $2`,
       [now, loanId]
     );
-
     return res.json({ message: "Loan rejected", loanId });
   } catch (err) {
     console.error("❌ Reject error:", err);
