@@ -13,11 +13,15 @@ const auth = require("../authMiddleware");
  *  - GET  /my-latest
  *  - GET  /my-active
  *  - GET  /:loanId
+ *  - POST /:loanId/accept   <-- NEW (borrower accepts admin-approved amount)
+ *  - POST /:loanId/reject   <-- NEW (borrower rejects admin-approved amount)
  */
+
+const LOG_PREFIX = "[LOAN_ROUTES]";
 
 router.post("/apply", auth, async (req, res) => {
   try {
-    console.log("🚀 /api/loans/apply called by user:", req.user?.id || "unknown");
+    console.log(LOG_PREFIX, "🚀 /api/loans/apply called by user:", req.user?.id || "unknown");
 
     const userId = req.user?.id;
     if (!userId) return res.status(401).json({ error: "Unauthorized" });
@@ -113,14 +117,14 @@ router.post("/apply", auth, async (req, res) => {
       ]
     );
 
-    console.log("✅ Loan INSERT Success:", loanRes.rows[0]?.id);
+    console.log(LOG_PREFIX, "✅ Loan INSERT Success:", loanRes.rows[0]?.id);
 
     return res.status(201).json({
       message: "Loan submitted successfully",
       loan: loanRes.rows[0],
     });
   } catch (err) {
-    console.error("❌ Loan Apply Error:", err);
+    console.error(LOG_PREFIX, "❌ Loan Apply Error:", err);
     return res.status(500).json({ error: "Server error", details: err.message });
   }
 });
@@ -134,7 +138,7 @@ router.get("/my-loans", auth, async (req, res) => {
     );
     res.json(result.rows || []);
   } catch (err) {
-    console.error("❌ my-loans error:", err);
+    console.error(LOG_PREFIX, "❌ my-loans error:", err);
     res.status(500).json({ error: "Server error", details: err.message });
   }
 });
@@ -148,7 +152,7 @@ router.get("/my-latest", auth, async (req, res) => {
     );
     res.json({ latestLoan: result.rows[0] || null });
   } catch (err) {
-    console.error("❌ my-latest error:", err);
+    console.error(LOG_PREFIX, "❌ my-latest error:", err);
     res.status(500).json({ error: "Server error", details: err.message });
   }
 });
@@ -168,7 +172,7 @@ router.get("/my-active", auth, async (req, res) => {
     );
     res.json(result.rows[0] || null);
   } catch (err) {
-    console.error("❌ my-active error:", err);
+    console.error(LOG_PREFIX, "❌ my-active error:", err);
     res.status(500).json({ error: "Server error", details: err.message });
   }
 });
@@ -187,8 +191,153 @@ router.get("/:loanId", auth, async (req, res) => {
 
     return res.json(result.rows[0]);
   } catch (err) {
-    console.error("❌ Get Loan Error:", err);
-    res.status(500).json({ error: "Server error", details: err.message });
+    console.error(LOG_PREFIX, "❌ Get Loan Error:", err);
+    return res.status(500).json({ error: "Server error", details: err.message });
+  }
+});
+
+/**
+ * POST /:loanId/accept
+ * Borrower accepts the admin-approved loan amount.
+ * - Only valid when loan.status = 'approved_pending_disburse'
+ * - Sets status = 'approved' and borrower_accepted_at = NOW()
+ * - Returns updated loan row
+ */
+router.post("/:loanId/accept", auth, async (req, res) => {
+  const loanId = req.params.loanId;
+  const userId = req.user?.id;
+
+  console.log(LOG_PREFIX, "Borrower accept called:", { loanId, userId });
+
+  const client = await db.connect();
+  try {
+    await client.query("BEGIN");
+
+    // Lock loan row
+    const loanQ = await client.query(
+      `SELECT * FROM loans WHERE id = $1 LIMIT 1 FOR UPDATE`,
+      [loanId]
+    );
+    if (loanQ.rows.length === 0) {
+      await client.query("ROLLBACK");
+      console.warn(LOG_PREFIX, "Loan not found on accept:", loanId);
+      return res.status(404).json({ error: "Loan not found" });
+    }
+
+    const loan = loanQ.rows[0];
+
+    // Ensure ownership
+    if (String(loan.user_id) !== String(userId)) {
+      await client.query("ROLLBACK");
+      console.warn(LOG_PREFIX, "User does not own loan:", { loanId, userId, owner: loan.user_id });
+      return res.status(403).json({ error: "Forbidden" });
+    }
+
+    // Only allow acceptance if status is approved_pending_disburse
+    if ((loan.status || "").toLowerCase() !== "approved_pending_disburse") {
+      await client.query("ROLLBACK");
+      console.warn(LOG_PREFIX, "Loan not in approved_pending_disburse on accept:", loanId, loan.status);
+      return res.status(400).json({
+        error: "INVALID_STATUS",
+        message: "Loan must be in approved_pending_disburse to accept",
+        currentStatus: loan.status,
+      });
+    }
+
+    const now = new Date().toISOString();
+
+    const upd = await client.query(
+      `UPDATE loans SET status = 'approved', borrower_accepted_at = $1 WHERE id = $2 RETURNING *`,
+      [now, loanId]
+    );
+
+    await client.query("COMMIT");
+
+    console.log(LOG_PREFIX, "Loan accepted by borrower:", loanId);
+
+    return res.json({ message: "Loan accepted", loan: upd.rows[0] });
+  } catch (err) {
+    console.error(LOG_PREFIX, "❌ Borrower accept error:", err);
+    try {
+      await client.query("ROLLBACK");
+    } catch (rb) {
+      console.error(LOG_PREFIX, "Rollback error:", rb);
+    }
+    return res.status(500).json({ error: "Server error", details: err.message });
+  } finally {
+    client.release();
+  }
+});
+
+/**
+ * POST /:loanId/reject
+ * Borrower rejects the admin-approved loan amount.
+ * - Only valid when loan.status = 'approved_pending_disburse'
+ * - Sets status = 'borrower_rejected' and borrower_rejected_at = NOW()
+ */
+router.post("/:loanId/reject", auth, async (req, res) => {
+  const loanId = req.params.loanId;
+  const userId = req.user?.id;
+
+  console.log(LOG_PREFIX, "Borrower reject called:", { loanId, userId });
+
+  const client = await db.connect();
+  try {
+    await client.query("BEGIN");
+
+    // Lock loan row
+    const loanQ = await client.query(
+      `SELECT * FROM loans WHERE id = $1 LIMIT 1 FOR UPDATE`,
+      [loanId]
+    );
+    if (loanQ.rows.length === 0) {
+      await client.query("ROLLBACK");
+      console.warn(LOG_PREFIX, "Loan not found on reject:", loanId);
+      return res.status(404).json({ error: "Loan not found" });
+    }
+
+    const loan = loanQ.rows[0];
+
+    // Ensure ownership
+    if (String(loan.user_id) !== String(userId)) {
+      await client.query("ROLLBACK");
+      console.warn(LOG_PREFIX, "User does not own loan (reject):", { loanId, userId, owner: loan.user_id });
+      return res.status(403).json({ error: "Forbidden" });
+    }
+
+    // Only allow rejection if status is approved_pending_disburse
+    if ((loan.status || "").toLowerCase() !== "approved_pending_disburse") {
+      await client.query("ROLLBACK");
+      console.warn(LOG_PREFIX, "Loan not in approved_pending_disburse on reject:", loanId, loan.status);
+      return res.status(400).json({
+        error: "INVALID_STATUS",
+        message: "Loan must be in approved_pending_disburse to reject",
+        currentStatus: loan.status,
+      });
+    }
+
+    const now = new Date().toISOString();
+
+    await client.query(
+      `UPDATE loans SET status = 'borrower_rejected', borrower_rejected_at = $1 WHERE id = $2`,
+      [now, loanId]
+    );
+
+    await client.query("COMMIT");
+
+    console.log(LOG_PREFIX, "Loan rejected by borrower:", loanId);
+
+    return res.json({ message: "Loan rejected", loanId });
+  } catch (err) {
+    console.error(LOG_PREFIX, "❌ Borrower reject error:", err);
+    try {
+      await client.query("ROLLBACK");
+    } catch (rb) {
+      console.error(LOG_PREFIX, "Rollback error:", rb);
+    }
+    return res.status(500).json({ error: "Server error", details: err.message });
+  } finally {
+    client.release();
   }
 });
 
