@@ -43,14 +43,14 @@ async function getDashboardStats(req, res) {
       db.query("SELECT COUNT(*)::int AS count FROM loans WHERE LOWER(status) = 'active'"),
       db.query("SELECT COUNT(*)::int AS count FROM loans WHERE LOWER(status) = 'rejected'"),
       db.query("SELECT COUNT(*)::int AS count FROM loans WHERE LOWER(status) = 'pending'"),
+      // >>> FIX: Only count loans that are truly READY for admin disbursement.
+      // We exclude intermediate states like 'approved_pending_disburse' which require borrower acceptance.
       db.query(
         `
         SELECT COUNT(*)::int AS count FROM loans
         WHERE LOWER(status) IN (
           'approved',
-          'approved_pending_disburse',
-          'approved_pending_disbursement',
-          'approved_for_disbursement'
+          'approved_for_disbursement' -- legacy alias (kept for backward compatibility)
         )
         `
       ),
@@ -65,7 +65,7 @@ async function getDashboardStats(req, res) {
     // Total disbursed amount
     const totalDisbursedLoanRes = await db.query(
       `
-      SELECT COALESCE(SUM(COALESCE(disbursed_amount, amount_requested, 0)), 0) AS total
+      SELECT COALESCE(SUM(COALESCE(disbursed_amount, amount_requested, total_payable, 0)), 0) AS total
       FROM loans
       WHERE disbursed_at IS NOT NULL
       `
@@ -150,16 +150,8 @@ async function getDashboardStats(req, res) {
       `
       SELECT 
         to_char(d, 'Dy') AS label,
-        COALESCE((
-          SELECT SUM(amount) FROM transactions t
-          WHERE t.type IN ('loan_payment','repayment')
-            AND t.created_at::date = d
-        ),0) AS total
-      FROM generate_series(
-        current_date - INTERVAL '6 days',
-        current_date,
-        INTERVAL '1 day'
-      ) d
+        COALESCE((SELECT SUM(amount) FROM transactions t WHERE t.type IN ('loan_payment','repayment') AND t.created_at::date = d),0) AS total
+      FROM generate_series(current_date - INTERVAL '6 days', current_date, INTERVAL '1 day') d
       ORDER BY d;
       `
     );
@@ -216,30 +208,12 @@ async function getDashboardStats(req, res) {
     // ---------------------------
     const cashRowsRes = await db.query(
       `
-      WITH weeks AS (
-        SELECT generate_series(11, 0, -1) AS idx
-      )
+      WITH weeks AS (SELECT generate_series(11, 0, -1) AS idx)
       SELECT 
         w.idx,
         (current_date - (w.idx * INTERVAL '7 days'))::date AS week_start,
-        
-        -- Disbursed this week
-        COALESCE((
-          SELECT SUM(COALESCE(disbursed_amount, total_payable, 0))
-          FROM loans
-          WHERE disbursed_at::date >= (current_date - ((w.idx + 1) * INTERVAL '7 days'))::date
-            AND disbursed_at::date <  (current_date - (w.idx * INTERVAL '7 days'))::date
-        ), 0) AS disbursed,
-
-        -- Repaid this week
-        COALESCE((
-          SELECT SUM(amount)
-          FROM transactions t
-          WHERE t.type IN ('loan_payment','repayment')
-            AND t.created_at::date >= (current_date - ((w.idx + 1) * INTERVAL '7 days'))::date
-            AND t.created_at::date < (current_date - (w.idx * INTERVAL '7 days'))::date
-        ), 0) AS repaid
-
+        COALESCE((SELECT SUM(COALESCE(disbursed_amount, total_payable, 0)) FROM loans WHERE disbursed_at::date >= (current_date - ((w.idx + 1) * INTERVAL '7 days'))::date AND disbursed_at::date <  (current_date - (w.idx * INTERVAL '7 days'))::date), 0) AS disbursed,
+        COALESCE((SELECT SUM(amount) FROM transactions t WHERE t.type IN ('loan_payment','repayment') AND t.created_at::date >= (current_date - ((w.idx + 1) * INTERVAL '7 days'))::date AND t.created_at::date < (current_date - (w.idx * INTERVAL '7 days'))::date), 0) AS repaid
       FROM weeks w
       ORDER BY w.idx;
       `
