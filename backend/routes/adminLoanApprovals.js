@@ -12,9 +12,13 @@ const admin = require("../adminMiddleware");
  * both the old columns (day_number, expected_amount, status, paid_at)
  * and the new columns (installment_number, amount_due, paid, overdue),
  * we insert values for *both* sets so NOT NULL constraints are satisfied.
+ *
+ * Also provides GET /pending to list pending loan applications for admin.
  */
 
+// -----------------------------
 // Utility: generate schedule rows (logical model)
+// -----------------------------
 function generateSchedule(loan) {
   const days = Number(loan.days || 0);
   const daily = Number(loan.daily_payment || 0);
@@ -42,7 +46,9 @@ function generateSchedule(loan) {
   return list;
 }
 
+// -----------------------------
 // Helper: get columns present in repayment_schedule as a Set
+// -----------------------------
 async function getRepaymentScheduleColumns(client) {
   const q = await client.query(
     `SELECT column_name FROM information_schema.columns WHERE table_name='repayment_schedule'`
@@ -50,7 +56,9 @@ async function getRepaymentScheduleColumns(client) {
   return new Set(q.rows.map((r) => r.column_name));
 }
 
+// -----------------------------
 // Helper: build insert SQL & values array depending on columnsPresent
+// -----------------------------
 function buildInsertForScheduleRows(rows, columnsPresent) {
   if (!rows || rows.length === 0) return { sql: null, values: [] };
 
@@ -78,7 +86,7 @@ function buildInsertForScheduleRows(rows, columnsPresent) {
   if (columnsPresent.has("status")) insertCols.push("status");
   if (columnsPresent.has("paid_at")) insertCols.push("paid_at");
 
-  // Remove potential duplicates (though above shouldn't create duplicates)
+  // Remove potential duplicates
   const uniqueCols = Array.from(new Set(insertCols));
 
   // Build placeholders and values
@@ -145,6 +153,41 @@ function buildInsertForScheduleRows(rows, columnsPresent) {
 
   return { sql, values };
 }
+
+// ============================================================
+// GET PENDING LOANS
+// ============================================================
+// Returns pending loans for admin review
+router.get("/pending", auth, admin, async (req, res) => {
+  try {
+    const q = await db.query(
+      `
+      SELECT 
+        id,
+        user_id,
+        principal,
+        total_payable,
+        daily_payment,
+        days,
+        purpose,
+        created_at,
+        gov_id_uri,
+        selfie_id_uri,
+        proof_uri,
+        status
+      FROM loans
+      WHERE LOWER(COALESCE(status,'')) = 'pending'
+      ORDER BY created_at ASC
+      LIMIT 200
+      `
+    );
+
+    return res.json(q.rows || []);
+  } catch (err) {
+    console.error("❌ Admin pending loans error:", err);
+    return res.status(500).json({ error: "Server error", details: err.message });
+  }
+});
 
 // ============================================================
 // APPROVE LOAN - robust variant
@@ -222,7 +265,7 @@ router.post("/approve/:loanId", auth, admin, async (req, res) => {
       Array.from(columnsPresent).join(", ")
     );
 
-    // Build SQL & vals based on present columns (this function now includes both old & new if present)
+    // Build SQL & vals based on present columns
     const { sql, values } = buildInsertForScheduleRows(scheduleRows, columnsPresent);
 
     if (sql) {
