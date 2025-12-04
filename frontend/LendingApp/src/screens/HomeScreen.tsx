@@ -11,11 +11,14 @@ import {
   FlatList,
   Dimensions,
   SafeAreaView,
+  Modal,
+  Pressable,
 } from "react-native";
 import LinearGradient from "react-native-linear-gradient";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import axios from "axios";
 import { useFocusEffect } from "@react-navigation/native";
+import Icon from "react-native-vector-icons/Feather";
 import { API_BASE } from "../config";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
@@ -37,10 +40,15 @@ export default function HomeScreen({ navigation }: any) {
 
   const [unreadCount, setUnreadCount] = useState(0);
 
+  // 🔵 Modal visibility
+  const [notifModalVisible, setNotifModalVisible] = useState(false);
+
   const [bannerIndex, setBannerIndex] = useState(0);
   const bannerRef = useRef<FlatList>(null);
 
-  // Auto-slide banner
+  // ============================
+  // AUTO-SLIDE BANNER
+  // ============================
   useEffect(() => {
     const interval = setInterval(() => {
       const nextIndex = (bannerIndex + 1) % BANNERS.length;
@@ -51,7 +59,9 @@ export default function HomeScreen({ navigation }: any) {
     return () => clearInterval(interval);
   }, [bannerIndex]);
 
-  // Fetch data safely (notifications isolated)
+  // ============================
+  // FETCH DATA
+  // ============================
   const fetchData = async () => {
     try {
       const token = await AsyncStorage.getItem("userToken");
@@ -59,7 +69,6 @@ export default function HomeScreen({ navigation }: any) {
 
       const headers = { Authorization: `Bearer ${token}` };
 
-      // 🟦 Core loan/user requests (must never fail)
       const [userRes, txRes, activeRes, latestRes] = await Promise.all([
         axios.get(`${API_BASE}/auth/me`, { headers }),
         axios.get(`${API_BASE}/transactions/my`, { headers }),
@@ -70,23 +79,19 @@ export default function HomeScreen({ navigation }: any) {
       setUser(userRes.data);
       setTransactions(txRes.data || []);
 
-      // ACTIVE LOAN PARSE
       const active =
         activeRes.data?.loan ||
         activeRes.data?.activeLoan ||
         activeRes.data;
-
       setActiveLoan(active?.id ? active : null);
 
-      // LATEST LOAN PARSE
       const latest =
         latestRes.data?.latestLoan ||
         latestRes.data?.loan ||
         latestRes.data;
-
       setLatestLoan(latest?.id ? latest : null);
 
-      // 🟦 Notifications (safe mode)
+      // Notifications safe mode
       try {
         const notifRes = await axios.get(`${API_BASE}/notifications/my`, {
           headers,
@@ -95,9 +100,8 @@ export default function HomeScreen({ navigation }: any) {
         const notifs = notifRes.data?.notifications || [];
         const unread = notifs.filter((n: any) => !n.is_read).length;
         setUnreadCount(unread);
-      } catch (notifErr) {
-        console.log("[HOME] Notifications endpoint not ready → ignoring");
-        setUnreadCount(0); // fallback
+      } catch {
+        setUnreadCount(0);
       }
     } catch (err) {
       console.log(LOG_PREFIX, "❌ Fetch error:", err);
@@ -116,6 +120,9 @@ export default function HomeScreen({ navigation }: any) {
     }, [])
   );
 
+  // ============================
+  // HELPERS
+  // ============================
   const getLoanAmount = (loan: any) => {
     if (!loan) return 0;
     const approved = Number(loan.approved_principal || 0);
@@ -142,30 +149,62 @@ export default function HomeScreen({ navigation }: any) {
   return (
     <SafeAreaView style={styles.safe}>
 
-      {/* FIXED HEADER */}
+      {/* ====================== HEADER ====================== */}
       <LinearGradient colors={["#169AF9", "#37AAF2"]} style={styles.header}>
         <View style={styles.headerTopRow}>
-          <TouchableOpacity
-            onPress={() => navigation.openDrawer()}
-            style={styles.menuContainer}
-          >
-            <Text style={styles.menuIcon}>☰</Text>
-            <Text style={styles.headerSubtitle}>Welcome Back</Text>
-            <Text style={styles.headerName}>{user?.full_name}</Text>
-          </TouchableOpacity>
 
-          {/* BELL ICON WITH BADGE */}
+          {/* MENU BUTTON + TEXT */}
+          <View style={styles.menuAndText}>
+            <TouchableOpacity onPress={() => navigation.openDrawer()}>
+              <Text style={styles.menuIcon}>☰</Text>
+            </TouchableOpacity>
+
+            <View style={{ marginLeft: 15 }}>
+              <Text style={styles.headerSubtitle}>Welcome Back</Text>
+              <Text style={styles.headerName}>{user?.full_name}</Text>
+            </View>
+          </View>
+
+          {/* BELL ICON WITH POP-UP */}
           <TouchableOpacity
-            onPress={() => navigation.navigate("Notifications")}
+            onPress={() => setNotifModalVisible(true)}
             style={styles.bellWrapper}
           >
-            <Text style={styles.bellIcon}>🔔</Text>
+            <Icon name="bell" size={20} color="#ffffff" />
             {unreadCount > 0 && <View style={styles.unreadDot} />}
           </TouchableOpacity>
+
         </View>
       </LinearGradient>
 
-      {/* BALANCE CARD */}
+      {/* ====================== NOTIFICATION POP-UP ====================== */}
+      <Modal
+        visible={notifModalVisible}
+        transparent
+        animationType="fade"
+      >
+        <Pressable
+          style={styles.modalOverlay}
+          onPress={() => setNotifModalVisible(false)}
+        >
+          <Pressable style={styles.modalContent}>
+            <Icon name="bell-off" size={40} color="#169AF9" style={{ marginBottom: 10 }} />
+            <Text style={styles.modalTitle}>No Notifications Yet</Text>
+            <Text style={styles.modalMessage}>
+              You currently have no alerts or messages.
+            </Text>
+
+            <TouchableOpacity
+              onPress={() => setNotifModalVisible(false)}
+              style={styles.modalButton}
+            >
+              <Text style={styles.modalButtonText}>Okay</Text>
+            </TouchableOpacity>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* ====================== BALANCE CARD ====================== */}
       <View style={styles.balanceCard}>
         {status === "active" && activeLoan ? (
           <>
@@ -210,14 +249,10 @@ export default function HomeScreen({ navigation }: any) {
         )}
       </View>
 
-      {/* SCROLLABLE BODY */}
-      <ScrollView
-        style={styles.body}
-        contentContainerStyle={{ paddingBottom: 30 }}
-        nestedScrollEnabled
-      >
+      {/* ====================== SCROLL BODY ====================== */}
+      <ScrollView style={styles.body} contentContainerStyle={{ paddingBottom: 30 }}>
 
-        {/* LOAN STATUS CARD */}
+        {/* LOAN STATUS */}
         <View style={styles.loanCard}>
           <Text style={styles.loanStatusHeader}>Loan Status</Text>
 
@@ -296,7 +331,7 @@ export default function HomeScreen({ navigation }: any) {
           </ScrollView>
         </View>
 
-        {/* BANNER */}
+        {/* BANNERS */}
         <View style={styles.bannerContainer}>
           <FlatList
             ref={bannerRef}
@@ -346,29 +381,85 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
 
-  bellWrapper: { position: "relative", paddingRight: 5 },
+  menuAndText: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+
+  menuIcon: {
+    fontSize: 26,
+    color: "#fff",
+  },
+
+  headerSubtitle: {
+    fontSize: 16,
+    color: "#fff",
+    fontWeight: "500",
+  },
+  headerName: {
+    fontSize: 22,
+    fontWeight: "700",
+    color: "#fff",
+    marginTop: 2,
+  },
+
+  bellWrapper: {
+    position: "relative",
+    padding: 5,
+  },
   unreadDot: {
     position: "absolute",
-    top: -2,
-    right: -2,
-    width: 10,
-    height: 10,
+    top: 1,
+    right: 1,
+    width: 9,
+    height: 9,
     borderRadius: 5,
-    backgroundColor: "#fff",
+    backgroundColor: "#FFFFFF",
     borderWidth: 2,
     borderColor: "#169AF9",
   },
 
-  menuContainer: { flexDirection: "row", alignItems: "center" },
-  menuIcon: { fontSize: 24, marginRight: 8, color: "#fff" },
-  headerSubtitle: { fontSize: 20, color: "#fff", fontWeight: "500" },
-  headerName: {
-    fontSize: 28,
-    fontWeight: "700",
-    color: "#fff",
-    marginLeft: 20,
+  // ==========================
+  // NOTIFICATION MODAL
+  // ==========================
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.45)",
+    justifyContent: "center",
+    alignItems: "center",
   },
-  bellIcon: { fontSize: 26, color: "#fff" },
+  modalContent: {
+    width: "80%",
+    backgroundColor: "#fff",
+    borderRadius: 18,
+    padding: 25,
+    alignItems: "center",
+    elevation: 10,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: "700",
+    marginBottom: 5,
+    color: "#000",
+  },
+  modalMessage: {
+    fontSize: 14,
+    color: "#555",
+    textAlign: "center",
+    marginBottom: 20,
+  },
+  modalButton: {
+    width: "100%",
+    backgroundColor: "#169AF9",
+    paddingVertical: 10,
+    borderRadius: 10,
+    alignItems: "center",
+  },
+  modalButtonText: {
+    color: "#fff",
+    fontSize: 16,
+    fontWeight: "700",
+  },
 
   body: { flex: 1, marginTop: 10 },
 
@@ -384,12 +475,8 @@ const styles = StyleSheet.create({
   },
   dailyPaymentText: { fontSize: 16, fontWeight: "700", marginBottom: 6 },
   dueDateText: { fontSize: 14, color: "#333", marginBottom: 12 },
-  balanceLabel: {
-    color: "#666",
-    fontSize: 16,
-    marginBottom: 10,
-    textAlign: "center",
-  },
+  balanceLabel: { color: "#666", fontSize: 16, marginBottom: 10, textAlign: "center" },
+
   primaryButton: {
     backgroundColor: "#0A9EFA",
     borderRadius: 10,
@@ -413,6 +500,7 @@ const styles = StyleSheet.create({
   loanRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   loanAmount: { fontSize: 20, fontWeight: "700", color: "#000" },
   loanAmountLabel: { color: "#666", fontSize: 12, marginTop: 2 },
+
   secondaryButton: {
     borderWidth: 1.5,
     borderColor: "#0A9EFA",

@@ -1,4 +1,3 @@
-// src/screens/AccountSettingsScreen.tsx
 import React, { useEffect, useState } from "react";
 import {
   View,
@@ -9,10 +8,12 @@ import {
   ScrollView,
   ActivityIndicator,
   Alert,
+  Image,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import axios from "axios";
 import Icon from "react-native-vector-icons/Ionicons";
+import { launchImageLibrary } from "react-native-image-picker";
 import { API_BASE } from "../config";
 
 export default function AccountSettingsScreen({ navigation }: any) {
@@ -21,8 +22,9 @@ export default function AccountSettingsScreen({ navigation }: any) {
 
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
+  const [photo, setPhoto] = useState<string | null>(null);
 
-  // Change password fields
+  // Password fields
   const [pass1, setPass1] = useState("");
   const [pass2, setPass2] = useState("");
 
@@ -30,6 +32,9 @@ export default function AccountSettingsScreen({ navigation }: any) {
     loadProfile();
   }, []);
 
+  // ------------------------------------------------------
+  // LOAD PROFILE (including stored profile_photo_url)
+  // ------------------------------------------------------
   const loadProfile = async () => {
     try {
       const token = await AsyncStorage.getItem("userToken");
@@ -40,16 +45,87 @@ export default function AccountSettingsScreen({ navigation }: any) {
       });
 
       const user = res.data;
+
       setFullName(user.full_name || "");
       setEmail(user.email || "");
+      setPhoto(user.profile_photo_url || null);
     } catch (err) {
-      console.error("Settings load error:", err);
       Alert.alert("Error", "Failed to load profile.");
     } finally {
       setLoading(false);
     }
   };
 
+  // ------------------------------------------------------
+  // PICK PHOTO
+  // ------------------------------------------------------
+  const pickProfilePhoto = async () => {
+    const res = await launchImageLibrary({
+      mediaType: "photo",
+      quality: 0.85,
+    });
+
+    if (res.didCancel) return;
+    if (!res.assets?.[0]) return;
+
+    const a = res.assets[0];
+
+    uploadProfilePhoto(a.uri!);
+  };
+
+  // ------------------------------------------------------
+  // UPLOAD PHOTO → /upload/profile-photo
+  // ------------------------------------------------------
+  const uploadProfilePhoto = async (uri: string) => {
+    try {
+      setSaving(true);
+
+      const form = new FormData();
+      form.append("file", {
+        uri,
+        name: `profile_${Date.now()}.jpg`,
+        type: "image/jpeg",
+      } as any);
+
+      const token = await AsyncStorage.getItem("userToken");
+
+      const res = await fetch(`${API_BASE}/upload/profile-photo`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "multipart/form-data",
+        },
+        body: form,
+      });
+
+      const json = await res.json();
+
+      if (!res.ok) throw new Error(json.error || "Upload failed");
+
+      // server returns { document: { url, public_id, ... } }
+      const url = json.document.url;
+
+      // update local state
+      setPhoto(url);
+
+      // also save in user table
+      await axios.put(
+        `${API_BASE}/auth/update-profile`,
+        { profile_photo_url: url },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+
+      Alert.alert("Updated", "Profile photo updated.");
+    } catch (err: any) {
+      Alert.alert("Error", err.message || "Upload failed.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // ------------------------------------------------------
+  // SAVE NAME ONLY
+  // ------------------------------------------------------
   const saveChanges = async () => {
     if (!fullName) return Alert.alert("Error", "Name cannot be empty.");
 
@@ -59,22 +135,23 @@ export default function AccountSettingsScreen({ navigation }: any) {
 
       await axios.put(
         `${API_BASE}/auth/update-profile`,
-        { full_name: fullName },
+        { full_name: fullName, profile_photo_url: photo },
         { headers: { Authorization: `Bearer ${token}` } }
       );
 
       Alert.alert("Updated", "Your profile has been updated.");
     } catch (err) {
-      console.error("Update profile error:", err);
       Alert.alert("Error", "Could not update profile.");
     } finally {
       setSaving(false);
     }
   };
 
+  // ------------------------------------------------------
+  // CHANGE PASSWORD
+  // ------------------------------------------------------
   const changePassword = async () => {
     if (!pass1 || !pass2) return Alert.alert("Error", "Enter both password fields.");
-
     if (pass1 !== pass2) return Alert.alert("Error", "Passwords do not match.");
 
     setSaving(true);
@@ -87,17 +164,19 @@ export default function AccountSettingsScreen({ navigation }: any) {
         { headers: { Authorization: `Bearer ${token}` } }
       );
 
-      Alert.alert("Success", "Password updated.");
       setPass1("");
       setPass2("");
+      Alert.alert("Success", "Password updated.");
     } catch (err) {
-      console.error("Change password error:", err);
       Alert.alert("Error", "Failed to update password.");
     } finally {
       setSaving(false);
     }
   };
 
+  // ------------------------------------------------------
+  // LOGOUT
+  // ------------------------------------------------------
   const logout = () => {
     Alert.alert("Confirm Logout", "Are you sure you want to logout?", [
       { text: "Cancel", style: "cancel" },
@@ -122,6 +201,7 @@ export default function AccountSettingsScreen({ navigation }: any) {
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 40 }}>
+      {/* HEADER */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()}>
           <Icon name="arrow-back" size={26} color="#fff" />
@@ -130,8 +210,24 @@ export default function AccountSettingsScreen({ navigation }: any) {
         <View style={{ width: 32 }} />
       </View>
 
+      {/* PROFILE CARD */}
       <View style={styles.card}>
-        <Text style={styles.cardTitle}>Profile</Text>
+        <Text style={styles.cardTitle}>Profile Photo</Text>
+
+        <View style={styles.avatarContainer}>
+          <Image
+            source={{
+              uri:
+                photo ||
+                "https://cdn-icons-png.flaticon.com/512/149/149071.png",
+            }}
+            style={styles.avatar}
+          />
+
+          <TouchableOpacity style={styles.changePhotoBtn} onPress={pickProfilePhoto}>
+            <Text style={styles.changePhotoText}>Change Photo</Text>
+          </TouchableOpacity>
+        </View>
 
         <TextInput
           style={styles.input}
@@ -147,6 +243,7 @@ export default function AccountSettingsScreen({ navigation }: any) {
         </TouchableOpacity>
       </View>
 
+      {/* PASSWORD CARD */}
       <View style={styles.card}>
         <Text style={styles.cardTitle}>Change Password</Text>
 
@@ -171,6 +268,7 @@ export default function AccountSettingsScreen({ navigation }: any) {
         </TouchableOpacity>
       </View>
 
+      {/* LOGOUT */}
       <TouchableOpacity style={styles.logoutBtn} onPress={logout}>
         <Text style={styles.logoutText}>Logout</Text>
       </TouchableOpacity>
@@ -201,7 +299,25 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     elevation: 3,
   },
+
   cardTitle: { fontWeight: "800", marginBottom: 10, fontSize: 15 },
+
+  avatarContainer: { alignItems: "center", marginBottom: 15 },
+  avatar: {
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    borderWidth: 3,
+    borderColor: "#169AF9",
+  },
+  changePhotoBtn: {
+    marginTop: 10,
+    backgroundColor: "#169AF9",
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 8,
+  },
+  changePhotoText: { color: "#fff", fontWeight: "700" },
 
   input: {
     borderWidth: 1,
