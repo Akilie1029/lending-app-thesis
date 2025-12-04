@@ -62,6 +62,7 @@ app.use(express.urlencoded({ extended: true }));
 // =================================================================
 //                           AUTH ROUTES
 // =================================================================
+// Register
 app.post("/api/auth/register", async (req, res) => {
   try {
     const full_name = (req.body.full_name || "").trim();
@@ -105,6 +106,7 @@ app.post("/api/auth/register", async (req, res) => {
   }
 });
 
+// Login
 app.post("/api/auth/login", async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -128,6 +130,7 @@ app.post("/api/auth/login", async (req, res) => {
       { expiresIn: "7d" }
     );
 
+    // include profile_photo and other useful fields
     res.json({
       token,
       user: {
@@ -169,8 +172,8 @@ app.get("/api/auth/me", authMiddleware, async (req, res) => {
   }
 });
 
-// Update profile (full_name and optional profile_photo_url)
-// Expects JSON: { full_name?: string, profile_photo_url?: string }
+// Update profile (full_name and optional profile_photo_url and payout fields)
+// Expects JSON: { full_name?: string, profile_photo_url?: string, payout_method?: string, payout_details?: object }
 app.put("/api/auth/update-profile", authMiddleware, async (req, res) => {
   try {
     const userId = req.user.id;
@@ -199,6 +202,7 @@ app.put("/api/auth/update-profile", authMiddleware, async (req, res) => {
     }
     if (payout_details != null) {
       updates.push(`payout_details = $${idx++}`);
+      // ensure we store JSONB properly
       values.push(payout_details);
     }
 
