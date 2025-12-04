@@ -1,3 +1,4 @@
+// index.js
 // =================================================================
 //                          IMPORTS & CONFIG
 // =================================================================
@@ -31,6 +32,9 @@ const adminRepaymentTools = require("./routes/adminRepaymentTools");
 const adminReports = require("./routes/adminReports");
 const disbursementHistory = require("./routes/disbursementHistory");
 
+// Notifications route (new)
+const notificationsRoutes = require("./routes/notifications");
+
 // Dashboard insights
 const adminStats = require("./controllers/adminStatsController");
 
@@ -41,9 +45,6 @@ const uploadRoutes = require("./routes/uploadRoutes");
 const adminLoanDocuments = require("./routes/adminLoanDocuments");
 const adminUserDocuments = require("./routes/adminUserDocuments");
 
-// ⭐ NEW: Notifications Routes
-const notificationRoutes = require("./routes/notifications");
-
 const app = express();
 const PORT = process.env.PORT || 5001;
 
@@ -51,14 +52,12 @@ const PORT = process.env.PORT || 5001;
 const JWT_SECRET = process.env.JWT_SECRET || "LOCAL_DEV_SECRET_ONLY";
 console.log("🔐 JWT_SECRET:", JWT_SECRET ? "Loaded" : "MISSING");
 
-
 // =================================================================
 //                            MIDDLEWARE
 // =================================================================
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-
 
 // =================================================================
 //                           AUTH ROUTES
@@ -164,14 +163,12 @@ app.get("/api/auth/me", authMiddleware, async (req, res) => {
   }
 });
 
-
 // =================================================================
 //                        USER LOAN & PAYMENT ROUTES
 // =================================================================
 app.use("/api/loans", loanRoutes);
 app.use("/api/repayments", repaymentRoutes);
 app.use("/api/dashboard", dashboardRoutes);
-
 
 // =================================================================
 //                           ADMIN ROUTES
@@ -199,18 +196,15 @@ app.get(
   adminStats.getDashboardStats
 );
 
-
 // =================================================================
 //                   CLOUDINARY UPLOAD ROUTES
 // =================================================================
 app.use("/api/upload", uploadRoutes);
 
-
 // =================================================================
 //                   NOTIFICATIONS ROUTES (NEW)
 // =================================================================
-app.use("/api", notificationRoutes);
-
+app.use("/api/notifications", notificationsRoutes);
 
 // =================================================================
 //                   USER BALANCE & TRANSACTIONS
@@ -279,7 +273,6 @@ app.get("/api/transactions/my-payments", authMiddleware, async (req, res) => {
   }
 });
 
-
 // =================================================================
 //                         TEST & DEBUG ROUTES
 // =================================================================
@@ -290,7 +283,6 @@ app.get("/api/debug/version", (req, res) => {
     hasDashboardRoute: typeof adminStats.getDashboardStats === "function",
   });
 });
-
 
 // =================================================================
 //                           START SERVER

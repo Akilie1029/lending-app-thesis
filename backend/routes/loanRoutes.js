@@ -3,23 +3,36 @@ const express = require("express");
 const router = express.Router();
 const db = require("../db");
 const auth = require("../authMiddleware");
-const axios = require("axios");
 
 const LOG = "[LOAN_ROUTES]";
-
-// Base URL for backend → backend notifications
-const BASE_URL = process.env.API_BASE_URL || "http://localhost:5001";
 
 /**
  * Borrower Loan Routes
  * Status flow:
  *  pending → approved_pending_disburse → approved → active → completed
  *
- * Notifications added:
+ * Notifications added (DB direct insert):
  *  - loan_submitted
  *  - loan_accepted
  *  - loan_rejected_by_borrower
  */
+
+// ---------------------------------------------------------------------
+// Helper: Create Notification (NO axios required)
+// ---------------------------------------------------------------------
+async function pushNotification({ user_id, loan_id, type, title, message }) {
+  try {
+    await db.query(
+      `
+      INSERT INTO notifications (id, user_id, loan_id, type, title, message)
+      VALUES (uuid_generate_v4(), $1, $2, $3, $4, $5)
+      `,
+      [user_id, loan_id, type, title, message]
+    );
+  } catch (err) {
+    console.error(LOG, "❌ pushNotification error:", err.message);
+  }
+}
 
 // ---------------------------------------------------------------------
 // APPLY FOR LOAN
@@ -62,7 +75,7 @@ router.post("/apply", auth, async (req, res) => {
       return res.status(400).json({ error: "ACTIVE_LOAN_EXISTS" });
     }
 
-    // Loan computation (20% fixed interest)
+    // Compute loan
     const interest = Number((principal * 0.20).toFixed(2));
     const total_payable = Number((principal + interest).toFixed(2));
     const daily_payment = Number((total_payable / days).toFixed(2));
@@ -116,18 +129,14 @@ router.post("/apply", auth, async (req, res) => {
 
     const newLoan = loanRes.rows[0];
 
-    // 🔔 Send Notification — Loan Submitted
-    try {
-      await axios.post(`${BASE_URL}/api/notifications/push`, {
-        user_id: userId,
-        loan_id: newLoan.id,
-        type: "loan_submitted",
-        title: "Loan Application Submitted",
-        message: "Your loan application has been received and is now under review.",
-      });
-    } catch (notifErr) {
-      console.error(LOG, "❌ Notification error:", notifErr);
-    }
+    // 🔔 DB Notification (loan_submitted)
+    await pushNotification({
+      user_id: userId,
+      loan_id: newLoan.id,
+      type: "loan_submitted",
+      title: "Loan Application Submitted",
+      message: "Your loan application has been received and is now under review.",
+    });
 
     return res.status(201).json({
       message: "Loan submitted successfully",
@@ -163,7 +172,7 @@ router.get("/my-latest", auth, async (req, res) => {
     );
     return res.json({ latestLoan: r.rows[0] || null });
   } catch (err) {
-    console.error(LOG, "❌ my-llatest error:", err);
+    console.error(LOG, "❌ my-latest error:", err);
     return res.status(500).json({ error: "Server error" });
   }
 });
@@ -237,7 +246,6 @@ router.post("/:loanId/accept", auth, async (req, res) => {
       });
     }
 
-    // Admin must have set approved values
     if (
       loan.approved_principal == null ||
       loan.approved_total_payable == null ||
@@ -265,18 +273,14 @@ router.post("/:loanId/accept", auth, async (req, res) => {
 
     await client.query("COMMIT");
 
-    // 🔔 Notification — Borrower Accepted Loan
-    try {
-      await axios.post(`${BASE_URL}/api/notifications/push`, {
-        user_id: userId,
-        loan_id: loanId,
-        type: "loan_accepted",
-        title: "Loan Accepted",
-        message: "You accepted the loan offer. Waiting for disbursement.",
-      });
-    } catch (notifErr) {
-      console.error(LOG, "❌ Notification error:", notifErr);
-    }
+    // 🔔 DB Notification
+    pushNotification({
+      user_id: userId,
+      loan_id: loanId,
+      type: "loan_accepted",
+      title: "Loan Accepted",
+      message: "You accepted the loan offer. Waiting for disbursement.",
+    });
 
     return res.json({
       message: "Loan accepted",
@@ -339,18 +343,14 @@ router.post("/:loanId/reject", auth, async (req, res) => {
 
     await client.query("COMMIT");
 
-    // 🔔 Notification — Borrower Rejected Offer
-    try {
-      await axios.post(`${BASE_URL}/api/notifications/push`, {
-        user_id: userId,
-        loan_id: loanId,
-        type: "loan_rejected_by_borrower",
-        title: "Loan Rejected",
-        message: "You rejected the loan offer.",
-      });
-    } catch (notifErr) {
-      console.error(LOG, "❌ Notification error:", notifErr);
-    }
+    // 🔔 DB Notification
+    pushNotification({
+      user_id: userId,
+      loan_id: loanId,
+      type: "loan_rejected_by_borrower",
+      title: "Loan Rejected",
+      message: "You rejected the loan offer.",
+    });
 
     return res.json({ message: "Loan rejected", loanId });
   } catch (err) {
