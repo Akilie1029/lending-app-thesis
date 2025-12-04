@@ -4,22 +4,21 @@ const router = express.Router();
 const db = require("../db");
 const auth = require("../authMiddleware");
 const admin = require("../adminMiddleware");
-const axios = require("axios");
 
-const BASE_URL = process.env.API_BASE_URL || "http://localhost:5001";
 const LOG_PREFIX = "[ADMIN_DISBURSE]";
+
+/**
+ * Notifications Disabled (safe no-op)
+ */
+async function pushNotification() {
+  return;
+}
 
 /**
  * Admin Disbursement routes
  *
- * - GET  /api/admin/disburse/pending   -> list loans with status = 'approved'
- * - POST /api/admin/disburse/:loanId   -> finalize disbursement (create schedule, tx, history, update loan)
- *
- * NOTE:
- *  - This file expects the loans table to include approved_* fields:
- *      approved_principal, approved_total_payable, approved_daily_payment
- *  - On disbursement we set disbursed_amount = approved_principal (per your choice)
- *  - Uses safe DB transactions and row-level locks (FOR UPDATE)
+ * - GET  /api/admin/disburse/pending
+ * - POST /api/admin/disburse/:loanId
  */
 
 // -------------------------
@@ -27,12 +26,11 @@ const LOG_PREFIX = "[ADMIN_DISBURSE]";
 // -------------------------
 function generateSchedule(loan) {
   const days = Number(loan.days || 0);
-  // prefer approved_daily_payment; fallback to approved_total_payable / days
   const daily = Number(loan.approved_daily_payment ?? 0);
 
   const list = [];
   const start = new Date();
-  start.setDate(start.getDate() + 1); // due starts tomorrow
+  start.setDate(start.getDate() + 1);
 
   for (let i = 0; i < days; i++) {
     const due = new Date(start.getTime() + i * 24 * 60 * 60 * 1000);
@@ -54,9 +52,10 @@ function generateSchedule(loan) {
 }
 
 async function getRepaymentScheduleColumns(client) {
-  const q = await client.query(
-    `SELECT column_name FROM information_schema.columns WHERE table_name='repayment_schedule'`
-  );
+  const q = await client.query(`
+    SELECT column_name FROM information_schema.columns 
+    WHERE table_name='repayment_schedule'
+  `);
   return new Set(q.rows.map((r) => r.column_name));
 }
 
@@ -133,7 +132,6 @@ function buildInsertForScheduleRows(rows, columnsPresent) {
 
 // -------------------------------------------------------------
 // GET /api/admin/disburse/pending
-// Loans ready for disbursement: status = 'approved'
 // -------------------------------------------------------------
 router.get("/disburse/pending", auth, admin, async (req, res) => {
   try {
@@ -146,30 +144,22 @@ router.get("/disburse/pending", auth, admin, async (req, res) => {
         l.user_id,
         u.full_name,
         u.email,
-
-        -- admin-approved fields (may be null if legacy)
         l.approved_principal,
         l.approved_total_payable,
         l.approved_daily_payment,
-
-        -- fallbacks / legacy fields
         l.principal,
         l.total_payable,
         l.daily_payment,
         l.remaining_balance,
-
         l.days,
         l.payout_method,
         l.payout_details,
-
         l.gov_id_uri,
         l.selfie_id_uri,
         l.proof_uri,
-
         l.created_at,
         l.approved_at,
         l.status
-
       FROM loans l
       LEFT JOIN users u ON u.id = l.user_id
       WHERE LOWER(COALESCE(l.status, '')) = 'approved'
@@ -177,7 +167,6 @@ router.get("/disburse/pending", auth, admin, async (req, res) => {
       `
     );
 
-    console.log(LOG_PREFIX, `Found ${q.rows.length} pending loans`);
     return res.json(q.rows);
   } catch (err) {
     console.error(LOG_PREFIX, "Pending disbursement fetch error:", err);
@@ -187,15 +176,6 @@ router.get("/disburse/pending", auth, admin, async (req, res) => {
 
 // -------------------------------------------------------------
 // POST /api/admin/disburse/:loanId
-// Final disbursement process
-// Steps:
-//  1) Validate loan status = 'approved'
-//  2) Ensure approved_principal exists
-//  3) Generate repayment schedule (based on approved_daily_payment & days)
-//  4) Insert repayment_schedule rows (if table exists / columns present)
-//  5) Insert transactions (loan_disbursement)
-//  6) Insert into disbursement_history
-//  7) Update loans: status='active', disbursed_at, remaining_balance = approved_total_payable, disbursed_amount = approved_principal
 // -------------------------------------------------------------
 router.post("/disburse/:loanId", auth, admin, async (req, res) => {
   const loanId = req.params.loanId;
@@ -216,25 +196,20 @@ router.post("/disburse/:loanId", auth, admin, async (req, res) => {
 
     if (loanQ.rows.length === 0) {
       await client.query("ROLLBACK");
-      console.warn(LOG_PREFIX, "Loan not found:", loanId);
       return res.status(404).json({ error: "Loan not found" });
     }
 
     const loan = loanQ.rows[0];
 
-    const status = (loan.status || "").toLowerCase();
-
-    if (status !== "approved") {
+    if ((loan.status || "").toLowerCase() !== "approved") {
       await client.query("ROLLBACK");
-      console.warn(LOG_PREFIX, "Loan not in 'approved' state:", loanId, "status:", loan.status);
       return res.status(400).json({
         error: "INVALID_STATUS",
-        message: "Loan must be in status 'approved' (borrower accepted) before disbursement",
+        message: "Loan must be in status 'approved' before disbursement",
         current_status: loan.status,
       });
     }
 
-    // Ensure admin-approved values are present
     if (loan.approved_principal == null) {
       await client.query("ROLLBACK");
       return res.status(400).json({
@@ -244,40 +219,32 @@ router.post("/disburse/:loanId", auth, admin, async (req, res) => {
     }
 
     const approvedPrincipal = Number(loan.approved_principal);
-    const approvedTotalPayable = Number(loan.approved_total_payable ?? loan.total_payable ?? 0);
-    const approvedDailyPayment = Number(loan.approved_daily_payment ?? loan.daily_payment ?? 0);
+    const approvedTotalPayable = Number(
+      loan.approved_total_payable ?? loan.total_payable ?? 0
+    );
+    const approvedDailyPayment = Number(
+      loan.approved_daily_payment ?? loan.daily_payment ?? 0
+    );
     const days = Number(loan.days || 0);
     const userId = loan.user_id;
 
     const disbursedAt = new Date().toISOString();
 
-    // -----------------------
-    // 1) Create repayment schedule (if days > 0)
-    // -----------------------
-    console.log(LOG_PREFIX, "Generating repayment schedule...");
+    // 1) Repayment schedule
     const scheduleRows = generateSchedule({
       id: loan.id,
       days,
       approved_daily_payment: approvedDailyPayment,
     });
 
-    console.log(LOG_PREFIX, `Generated ${scheduleRows.length} schedule rows`);
-
     const columnsPresent = await getRepaymentScheduleColumns(client);
     const { sql, values } = buildInsertForScheduleRows(scheduleRows, columnsPresent);
 
     if (sql) {
-      console.log(LOG_PREFIX, "Inserting repayment schedule rows...");
       await client.query(sql, values);
-      console.log(LOG_PREFIX, "Repayment schedule insertion complete.");
-    } else {
-      console.warn(LOG_PREFIX, "No repayment_schedule INSERT generated (maybe table missing or no rows).");
     }
 
-    // -----------------------
-    // 2) Insert disbursement transaction
-    // -----------------------
-    console.log(LOG_PREFIX, "Inserting disbursement transaction...");
+    // 2) Transaction entry
     const txRes = await client.query(
       `
       INSERT INTO transactions
@@ -289,10 +256,7 @@ router.post("/disburse/:loanId", auth, admin, async (req, res) => {
       [userId, loanId, approvedPrincipal, loan.payout_method || null, payoutReference, disbursedAt]
     );
 
-    // -----------------------
-    // 3) Insert disbursement_history
-    // -----------------------
-    console.log(LOG_PREFIX, "Logging disbursement history...");
+    // 3) Disbursement history
     const dhRes = await client.query(
       `
       INSERT INTO disbursement_history
@@ -303,14 +267,7 @@ router.post("/disburse/:loanId", auth, admin, async (req, res) => {
       [loanId, userId, approvedPrincipal, loan.payout_method || null, payoutReference, disbursedAt]
     );
 
-    // -----------------------
-    // 4) Update loan -> active
-    //    - status = 'active'
-    //    - disbursed_at
-    //    - remaining_balance = approved_total_payable
-    //    - disbursed_amount = approved_principal  <-- NEW (per your choice)
-    // -----------------------
-    console.log(LOG_PREFIX, "Finalizing loan activation...");
+    // 4) Update loan → active
     const updatedLoanQ = await client.query(
       `
       UPDATE loans
@@ -327,22 +284,8 @@ router.post("/disburse/:loanId", auth, admin, async (req, res) => {
 
     await client.query("COMMIT");
 
-    console.log(LOG_PREFIX, "Loan successfully disbursed:", loanId);
-
-    // -------------------------------------------------
-    // 🔔 Send Notification — Loan Disbursed
-    // -------------------------------------------------
-    try {
-      await axios.post(`${BASE_URL}/api/notifications/push`, {
-        user_id: userId,
-        loan_id: loanId,
-        type: "loan_disbursed",
-        title: "Loan Disbursed",
-        message: `Your loan of ₱${approvedPrincipal.toLocaleString()} has been disbursed and is now available.`,
-      });
-    } catch (notifErr) {
-      console.error(LOG_PREFIX, "❌ Notification error:", notifErr);
-    }
+    // 🔕 No notifications
+    pushNotification();
 
     return res.json({
       message: "Loan successfully disbursed",
@@ -355,9 +298,7 @@ router.post("/disburse/:loanId", auth, admin, async (req, res) => {
     console.error(LOG_PREFIX, "❌ Disbursement ERROR:", err);
     try {
       await client.query("ROLLBACK");
-    } catch (rbErr) {
-      console.error(LOG_PREFIX, "Rollback error:", rbErr);
-    }
+    } catch (e) {}
     return res.status(500).json({ error: "Server error", details: err.message });
   } finally {
     client.release();
