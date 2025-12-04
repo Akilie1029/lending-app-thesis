@@ -11,27 +11,15 @@ const LOG = "[LOAN_ROUTES]";
  * Status flow:
  *  pending → approved_pending_disburse → approved → active → completed
  *
- * Notifications added (DB direct insert):
- *  - loan_submitted
- *  - loan_accepted
- *  - loan_rejected_by_borrower
+ * Notifications temporarily DISABLED (safe no-op).
  */
 
 // ---------------------------------------------------------------------
-// Helper: Create Notification (NO axios required)
+// Helper: Create Notification (SAFE NO-OP)
 // ---------------------------------------------------------------------
-async function pushNotification({ user_id, loan_id, type, title, message }) {
-  try {
-    await db.query(
-      `
-      INSERT INTO notifications (id, user_id, loan_id, type, title, message)
-      VALUES (uuid_generate_v4(), $1, $2, $3, $4, $5)
-      `,
-      [user_id, loan_id, type, title, message]
-    );
-  } catch (err) {
-    console.error(LOG, "❌ pushNotification error:", err.message);
-  }
+async function pushNotification() {
+  // 🔇 Notifications disabled for stability before deadline
+  return;
 }
 
 // ---------------------------------------------------------------------
@@ -129,14 +117,8 @@ router.post("/apply", auth, async (req, res) => {
 
     const newLoan = loanRes.rows[0];
 
-    // 🔔 DB Notification (loan_submitted)
-    await pushNotification({
-      user_id: userId,
-      loan_id: newLoan.id,
-      type: "loan_submitted",
-      title: "Loan Application Submitted",
-      message: "Your loan application has been received and is now under review.",
-    });
+    // 🔕 Notifications disabled
+    pushNotification();
 
     return res.status(201).json({
       message: "Loan submitted successfully",
@@ -273,14 +255,8 @@ router.post("/:loanId/accept", auth, async (req, res) => {
 
     await client.query("COMMIT");
 
-    // 🔔 DB Notification
-    pushNotification({
-      user_id: userId,
-      loan_id: loanId,
-      type: "loan_accepted",
-      title: "Loan Accepted",
-      message: "You accepted the loan offer. Waiting for disbursement.",
-    });
+    // 🔕 Notifications disabled
+    pushNotification();
 
     return res.json({
       message: "Loan accepted",
@@ -343,14 +319,8 @@ router.post("/:loanId/reject", auth, async (req, res) => {
 
     await client.query("COMMIT");
 
-    // 🔔 DB Notification
-    pushNotification({
-      user_id: userId,
-      loan_id: loanId,
-      type: "loan_rejected_by_borrower",
-      title: "Loan Rejected",
-      message: "You rejected the loan offer.",
-    });
+    // 🔕 Notifications disabled
+    pushNotification();
 
     return res.json({ message: "Loan rejected", loanId });
   } catch (err) {
