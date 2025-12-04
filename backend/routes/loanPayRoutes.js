@@ -4,6 +4,9 @@ const router = express.Router();
 const db = require("../db");
 const auth = require("../authMiddleware");
 const { recalcLoanRemainingBalance } = require("../services/repaymentEngine");
+const axios = require("axios");
+
+const BASE_URL = process.env.API_BASE_URL || "http://localhost:5001";
 
 /**
  * POST /api/repayments/pay
@@ -17,9 +20,9 @@ const { recalcLoanRemainingBalance } = require("../services/repaymentEngine");
  *  - Prevents double-payments on completed loans
  *  - Inserts transaction and repayment_history inside a DB transaction
  *  - Updates loans.remaining_balance and status (completed if remaining <= 0)
- *  - Returns a receipt-like payload for frontend
- *
- * NOTE: loan_id is treated as a UUID string (do NOT cast to Number()).
+ *  - Sends notifications:
+ *      • loan_payment
+ *      • loan_completed (if remaining <= 0)
  */
 
 router.post("/pay", auth, async (req, res) => {
@@ -63,8 +66,10 @@ router.post("/pay", auth, async (req, res) => {
 
     const loan = loanQ.rows[0];
 
-    // Determine remaining balance using stored field, fallback to total_payable
-    const remainingBefore = Number(loan.remaining_balance != null ? loan.remaining_balance : loan.total_payable || 0);
+    // Determine remaining balance
+    const remainingBefore = Number(
+      loan.remaining_balance != null ? loan.remaining_balance : loan.total_payable || 0
+    );
 
     if (remainingBefore <= 0) {
       await client.query("ROLLBACK");
@@ -77,10 +82,12 @@ router.post("/pay", auth, async (req, res) => {
       });
     }
 
-    // If payment amount is greater than remaining, allow but cap remaining at 0 (overpayment recorded)
+    // If payment amount is greater than remaining, allow but cap
     const appliedAmount = Math.min(payAmount, remainingBefore);
 
-    console.log(`💳 Applying payment: loanId=${loanId} amount=${appliedAmount} (requested=${payAmount}) remainingBefore=${remainingBefore}`);
+    console.log(
+      `💳 Applying payment: loanId=${loanId} amount=${appliedAmount} (requested=${payAmount}) remainingBefore=${remainingBefore}`
+    );
 
     // 1) Insert transaction
     const txRes = await client.query(
@@ -108,20 +115,50 @@ router.post("/pay", auth, async (req, res) => {
     const repayment = rhRes.rows[0];
     console.log("✅ Repayment history inserted:", repayment.id);
 
-    // 3) Recalculate remaining balance using repayment_history aggregate
-    // We'll recalc using the service helper which updates the loans table
+    // 3) Recalculate remaining
     const newRemaining = await recalcLoanRemainingBalance(loanId);
 
     console.log(`🔁 Remaining balance recalculated: ${newRemaining} (loanId=${loanId})`);
 
-    // 4) Return payment receipt and updated loan
-    // Re-fetch the updated loan row to ensure frontend has latest data
+    // 4) Fetch updated loan row
     const updatedLoanRes = await client.query(`SELECT * FROM loans WHERE id = $1 LIMIT 1`, [loanId]);
     const updatedLoan = updatedLoanRes.rows[0];
 
     await client.query("COMMIT");
 
     console.log("✅ Payment flow COMMIT complete for loanId=", loanId);
+
+    // ------------------------------------------------------------------
+    // 🔔 NOTIFICATION #1 — Payment Successful
+    // ------------------------------------------------------------------
+    try {
+      await axios.post(`${BASE_URL}/api/notifications/push`, {
+        user_id: userId,
+        loan_id: loanId,
+        type: "loan_payment",
+        title: "Payment Received",
+        message: `Your payment of ₱${appliedAmount.toLocaleString()} has been posted.`,
+      });
+    } catch (err) {
+      console.error("❌ Payment notification failed:", err);
+    }
+
+    // ------------------------------------------------------------------
+    // 🔔 NOTIFICATION #2 — Loan Fully Paid (if remaining <= 0)
+    // ------------------------------------------------------------------
+    if (newRemaining <= 0) {
+      try {
+        await axios.post(`${BASE_URL}/api/notifications/push`, {
+          user_id: userId,
+          loan_id: loanId,
+          type: "loan_completed",
+          title: "Loan Completed",
+          message: "Congratulations! Your loan is now fully paid.",
+        });
+      } catch (err) {
+        console.error("❌ Loan completed notification failed:", err);
+      }
+    }
 
     return res.json({
       success: true,

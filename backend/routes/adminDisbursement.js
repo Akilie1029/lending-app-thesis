@@ -4,7 +4,9 @@ const router = express.Router();
 const db = require("../db");
 const auth = require("../authMiddleware");
 const admin = require("../adminMiddleware");
+const axios = require("axios");
 
+const BASE_URL = process.env.API_BASE_URL || "http://localhost:5001";
 const LOG_PREFIX = "[ADMIN_DISBURSE]";
 
 /**
@@ -326,6 +328,21 @@ router.post("/disburse/:loanId", auth, admin, async (req, res) => {
     await client.query("COMMIT");
 
     console.log(LOG_PREFIX, "Loan successfully disbursed:", loanId);
+
+    // -------------------------------------------------
+    // 🔔 Send Notification — Loan Disbursed
+    // -------------------------------------------------
+    try {
+      await axios.post(`${BASE_URL}/api/notifications/push`, {
+        user_id: userId,
+        loan_id: loanId,
+        type: "loan_disbursed",
+        title: "Loan Disbursed",
+        message: `Your loan of ₱${approvedPrincipal.toLocaleString()} has been disbursed and is now available.`,
+      });
+    } catch (notifErr) {
+      console.error(LOG_PREFIX, "❌ Notification error:", notifErr);
+    }
 
     return res.json({
       message: "Loan successfully disbursed",

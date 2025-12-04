@@ -41,6 +41,9 @@ const uploadRoutes = require("./routes/uploadRoutes");
 const adminLoanDocuments = require("./routes/adminLoanDocuments");
 const adminUserDocuments = require("./routes/adminUserDocuments");
 
+// ⭐ NEW: Notifications Routes
+const notificationRoutes = require("./routes/notifications");
+
 const app = express();
 const PORT = process.env.PORT || 5001;
 
@@ -201,6 +204,12 @@ app.get(
 //                   CLOUDINARY UPLOAD ROUTES
 // =================================================================
 app.use("/api/upload", uploadRoutes);
+
+
+// =================================================================
+//                   NOTIFICATIONS ROUTES (NEW)
+// =================================================================
+app.use("/api", notificationRoutes);
 
 
 // =================================================================

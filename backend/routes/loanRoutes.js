@@ -3,15 +3,22 @@ const express = require("express");
 const router = express.Router();
 const db = require("../db");
 const auth = require("../authMiddleware");
+const axios = require("axios");
 
 const LOG = "[LOAN_ROUTES]";
 
+// Base URL for backend → backend notifications
+const BASE_URL = process.env.API_BASE_URL || "http://localhost:5001";
+
 /**
  * Borrower Loan Routes
- * Clean + fresh version (no legacy fallback)
- *
  * Status flow:
  *  pending → approved_pending_disburse → approved → active → completed
+ *
+ * Notifications added:
+ *  - loan_submitted
+ *  - loan_accepted
+ *  - loan_rejected_by_borrower
  */
 
 // ---------------------------------------------------------------------
@@ -107,9 +114,24 @@ router.post("/apply", auth, async (req, res) => {
       ]
     );
 
+    const newLoan = loanRes.rows[0];
+
+    // 🔔 Send Notification — Loan Submitted
+    try {
+      await axios.post(`${BASE_URL}/api/notifications/push`, {
+        user_id: userId,
+        loan_id: newLoan.id,
+        type: "loan_submitted",
+        title: "Loan Application Submitted",
+        message: "Your loan application has been received and is now under review.",
+      });
+    } catch (notifErr) {
+      console.error(LOG, "❌ Notification error:", notifErr);
+    }
+
     return res.status(201).json({
       message: "Loan submitted successfully",
-      loan: loanRes.rows[0],
+      loan: newLoan,
     });
   } catch (err) {
     console.error(LOG, "❌ Loan apply error:", err);
@@ -141,7 +163,7 @@ router.get("/my-latest", auth, async (req, res) => {
     );
     return res.json({ latestLoan: r.rows[0] || null });
   } catch (err) {
-    console.error(LOG, "❌ my-latest error:", err);
+    console.error(LOG, "❌ my-llatest error:", err);
     return res.status(500).json({ error: "Server error" });
   }
 });
@@ -215,7 +237,7 @@ router.post("/:loanId/accept", auth, async (req, res) => {
       });
     }
 
-    // Admin must have set all approved values
+    // Admin must have set approved values
     if (
       loan.approved_principal == null ||
       loan.approved_total_payable == null ||
@@ -242,6 +264,19 @@ router.post("/:loanId/accept", auth, async (req, res) => {
     );
 
     await client.query("COMMIT");
+
+    // 🔔 Notification — Borrower Accepted Loan
+    try {
+      await axios.post(`${BASE_URL}/api/notifications/push`, {
+        user_id: userId,
+        loan_id: loanId,
+        type: "loan_accepted",
+        title: "Loan Accepted",
+        message: "You accepted the loan offer. Waiting for disbursement.",
+      });
+    } catch (notifErr) {
+      console.error(LOG, "❌ Notification error:", notifErr);
+    }
 
     return res.json({
       message: "Loan accepted",
@@ -303,6 +338,19 @@ router.post("/:loanId/reject", auth, async (req, res) => {
     );
 
     await client.query("COMMIT");
+
+    // 🔔 Notification — Borrower Rejected Offer
+    try {
+      await axios.post(`${BASE_URL}/api/notifications/push`, {
+        user_id: userId,
+        loan_id: loanId,
+        type: "loan_rejected_by_borrower",
+        title: "Loan Rejected",
+        message: "You rejected the loan offer.",
+      });
+    } catch (notifErr) {
+      console.error(LOG, "❌ Notification error:", notifErr);
+    }
 
     return res.json({ message: "Loan rejected", loanId });
   } catch (err) {

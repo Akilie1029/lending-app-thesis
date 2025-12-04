@@ -4,7 +4,9 @@ const router = express.Router();
 const db = require("../db");
 const auth = require("../authMiddleware");
 const admin = require("../adminMiddleware");
+const axios = require("axios");
 
+const BASE_URL = process.env.API_BASE_URL || "http://localhost:5001";
 const LOG_PREFIX = "[ADMIN_APPROVAL]";
 
 /**
@@ -96,7 +98,6 @@ router.post("/approve/:loanId", auth, admin, async (req, res) => {
     }
 
     const requested = Number(loan.amount_requested ?? loan.principal);
-
     const approvedPrincipal = Number(req.body?.approved_principal);
 
     if (!approvedPrincipal || approvedPrincipal <= 0) {
@@ -118,13 +119,6 @@ router.post("/approve/:loanId", auth, admin, async (req, res) => {
     const days = Number(loan.days);
     const approvedDailyPayment =
       days > 0 ? Number((approvedTotalPayable / days).toFixed(2)) : approvedTotalPayable;
-
-    console.log(LOG_PREFIX, "Computed approved values:", {
-      approvedPrincipal,
-      approvedInterest,
-      approvedTotalPayable,
-      approvedDailyPayment,
-    });
 
     const now = new Date().toISOString();
 
@@ -153,6 +147,21 @@ router.post("/approve/:loanId", auth, admin, async (req, res) => {
     await client.query("COMMIT");
 
     console.log(LOG_PREFIX, "Loan approved (pending borrower acceptance).");
+
+    // -------------------------------------------------
+    // 🔔 Send Notification — Loan Approved
+    // -------------------------------------------------
+    try {
+      await axios.post(`${BASE_URL}/api/notifications/push`, {
+        user_id: loan.user_id,
+        loan_id: loan.id,
+        type: "loan_approved",
+        title: "Loan Approved",
+        message: "Your loan has been approved. Please review and accept the offer.",
+      });
+    } catch (notifErr) {
+      console.error(LOG_PREFIX, "❌ Notification error:", notifErr);
+    }
 
     return res.json({
       message: "Loan approved (awaiting borrower acceptance)",
@@ -190,13 +199,30 @@ router.post("/reject/:loanId", auth, admin, async (req, res) => {
       SET status = 'rejected',
           rejected_at = $1
       WHERE id = $2
-      RETURNING id
+      RETURNING id, user_id
       `,
       [now, loanId]
     );
 
     if (!q.rows.length) {
       return res.status(404).json({ error: "Loan not found" });
+    }
+
+    const loan = q.rows[0];
+
+    // -------------------------------------------------
+    // 🔔 Send Notification — Loan Rejected by Admin
+    // -------------------------------------------------
+    try {
+      await axios.post(`${BASE_URL}/api/notifications/push`, {
+        user_id: loan.user_id,
+        loan_id: loanId,
+        type: "loan_rejected",
+        title: "Loan Rejected",
+        message: "Your loan application has been rejected.",
+      });
+    } catch (notifErr) {
+      console.error(LOG_PREFIX, "❌ Notification error:", notifErr);
     }
 
     return res.json({ message: "Loan rejected", loanId });
