@@ -4,10 +4,16 @@ const router = express.Router();
 const db = require("../db");
 const auth = require("../authMiddleware");
 const admin = require("../adminMiddleware");
-const axios = require("axios");
 
-const BASE_URL = process.env.API_BASE_URL || "http://localhost:5001";
 const LOG_PREFIX = "[ADMIN_APPROVAL]";
+
+/**
+ * Notifications DISABLED (safe no-op)
+ * This ensures no crashes while keeping the structure ready for future use.
+ */
+async function pushNotification() {
+  return;
+}
 
 /**
  * Handles:
@@ -66,7 +72,7 @@ router.get("/pending", auth, admin, async (req, res) => {
 });
 
 // ---------------------------------------------------------
-// ADMIN APPROVES LOAN (FULL APPROVAL WITH approved_* FIELDS)
+// ADMIN APPROVES LOAN
 // ---------------------------------------------------------
 router.post("/approve/:loanId", auth, admin, async (req, res) => {
   const loanId = req.params.loanId;
@@ -80,7 +86,10 @@ router.post("/approve/:loanId", auth, admin, async (req, res) => {
   try {
     await client.query("BEGIN");
 
-    const loanQ = await client.query(`SELECT * FROM loans WHERE id = $1 FOR UPDATE`, [loanId]);
+    const loanQ = await client.query(
+      `SELECT * FROM loans WHERE id = $1 FOR UPDATE`,
+      [loanId]
+    );
 
     if (loanQ.rows.length === 0) {
       await client.query("ROLLBACK");
@@ -113,12 +122,16 @@ router.post("/approve/:loanId", auth, admin, async (req, res) => {
       });
     }
 
-    // Compute approved_* values
+    // Compute approved values
     const approvedInterest = Number((approvedPrincipal * 0.20).toFixed(2));
-    const approvedTotalPayable = Number((approvedPrincipal + approvedInterest).toFixed(2));
+    const approvedTotalPayable = Number(
+      (approvedPrincipal + approvedInterest).toFixed(2)
+    );
     const days = Number(loan.days);
     const approvedDailyPayment =
-      days > 0 ? Number((approvedTotalPayable / days).toFixed(2)) : approvedTotalPayable;
+      days > 0
+        ? Number((approvedTotalPayable / days).toFixed(2))
+        : approvedTotalPayable;
 
     const now = new Date().toISOString();
 
@@ -148,20 +161,8 @@ router.post("/approve/:loanId", auth, admin, async (req, res) => {
 
     console.log(LOG_PREFIX, "Loan approved (pending borrower acceptance).");
 
-    // -------------------------------------------------
-    // 🔔 Send Notification — Loan Approved
-    // -------------------------------------------------
-    try {
-      await axios.post(`${BASE_URL}/api/notifications/push`, {
-        user_id: loan.user_id,
-        loan_id: loan.id,
-        type: "loan_approved",
-        title: "Loan Approved",
-        message: "Your loan has been approved. Please review and accept the offer.",
-      });
-    } catch (notifErr) {
-      console.error(LOG_PREFIX, "❌ Notification error:", notifErr);
-    }
+    // 🔕 Notifications disabled
+    pushNotification();
 
     return res.json({
       message: "Loan approved (awaiting borrower acceptance)",
@@ -208,22 +209,8 @@ router.post("/reject/:loanId", auth, admin, async (req, res) => {
       return res.status(404).json({ error: "Loan not found" });
     }
 
-    const loan = q.rows[0];
-
-    // -------------------------------------------------
-    // 🔔 Send Notification — Loan Rejected by Admin
-    // -------------------------------------------------
-    try {
-      await axios.post(`${BASE_URL}/api/notifications/push`, {
-        user_id: loan.user_id,
-        loan_id: loanId,
-        type: "loan_rejected",
-        title: "Loan Rejected",
-        message: "Your loan application has been rejected.",
-      });
-    } catch (notifErr) {
-      console.error(LOG_PREFIX, "❌ Notification error:", notifErr);
-    }
+    // 🔕 Notifications disabled
+    pushNotification();
 
     return res.json({ message: "Loan rejected", loanId });
   } catch (err) {
