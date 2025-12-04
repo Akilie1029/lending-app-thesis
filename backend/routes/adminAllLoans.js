@@ -5,48 +5,71 @@ const db = require("../db");
 const auth = require("../authMiddleware");
 const admin = require("../adminMiddleware");
 
+const LOG = "[ADMIN_ALL_LOANS]";
+
 /**
  * ADMIN — GET ALL LOANS (ALL STATUSES)
- *
- * Notes:
- * - UUID-safe (NO numeric conversion)
- * - Returns canonical fields + user info
- * - Includes debugging logs
- * - Intended for AdminAllLoansScreen
+ * Fully compatible with AdminAllLoansScreen
+ * Status Flow:
+ *   pending
+ *   approved_pending_disburse
+ *   approved
+ *   active
+ *   completed
+ *   rejected
+ *   borrower_rejected
  */
 
 router.get("/admin/all-loans", auth, admin, async (req, res) => {
   try {
-    console.log("📊 [ADMIN] GET /admin/all-loans triggered by:", req.user?.id);
+    console.log(LOG, "📡 Request by admin:", req.user?.id);
 
     const sql = `
       SELECT 
         l.id,
         l.user_id,
-        u.full_name,
+        u.full_name AS user_full_name,
         u.email,
 
+        -- canonical display amount
+        COALESCE(l.approved_principal, l.principal, 0) AS amount,
+
+        -- full loan numbers
         l.principal,
+        l.interest,
         l.total_payable,
         l.remaining_balance,
         l.days,
         l.purpose,
 
-        l.status,
-        l.created_at,
+        -- approved fields
+        l.approved_principal,
+        l.approved_interest,
+        l.approved_total_payable,
+        l.approved_daily_payment,
         l.approved_at,
+
+        -- borrower actions
+        l.borrower_accepted_at,
+        l.borrower_rejected_at,
+
+        -- life cycle timestamps
+        l.created_at,
         l.disbursed_at,
         l.completed_at,
         l.rejected_at,
-        l.rejection_reason,
 
+        -- payout
         l.payout_method,
         l.payout_details,
 
-        -- canonical document fields
+        -- docs
         l.gov_id_uri,
         l.selfie_id_uri,
-        l.proof_uri
+        l.proof_uri,
+
+        -- FINAL STATUS
+        l.status
 
       FROM loans l
       LEFT JOIN users u ON u.id = l.user_id
@@ -54,16 +77,16 @@ router.get("/admin/all-loans", auth, admin, async (req, res) => {
       LIMIT 2000
     `;
 
-    const result = await db.query(sql);
+    const rs = await db.query(sql);
 
-    console.log(`📌 All loans fetched successfully. Count=${result.rows.length}`);
+    console.log(LOG, "➡ Total loans:", rs.rows.length);
 
     return res.json({
-      count: result.rows.length,
-      loans: result.rows,
+      count: rs.rows.length,
+      loans: rs.rows,
     });
   } catch (err) {
-    console.error("❌ [ADMIN] /admin/all-loans ERROR:", err);
+    console.error(LOG, "❌ ERROR:", err);
     return res.status(500).json({
       error: "Failed to load loans",
       details: err.message,

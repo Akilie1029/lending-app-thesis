@@ -1,33 +1,30 @@
+// routes/adminLoanApprovals.js
 const express = require("express");
 const router = express.Router();
 const db = require("../db");
 const auth = require("../authMiddleware");
 const admin = require("../adminMiddleware");
 
-const LOG_PREFIX = "[ADMIN_APPROVALS]";
+const LOG_PREFIX = "[ADMIN_APPROVAL]";
 
 /**
- * Admin Loan Approvals
+ * Handles:
+ *  - GET /pending
+ *  - POST /approve/:loanId
+ *  - POST /reject/:loanId
  *
- * Responsibilities:
- *  - List pending loan applications (status = 'pending')
- *  - Approve a loan (admin sets approved_principal) -> status = 'approved_pending_disburse'
- *    * Stores approved_principal, approved_interest, approved_total_payable, approved_daily_payment, approved_at
- *  - Reject a loan -> status = 'rejected'
- *
- * Notes / assumptions:
- *  - Interest rule: flat 20% (5-6 system)
- *  - approved_daily_payment is computed as approved_total_payable / days (if days > 0)
- *  - Admin is NOT disbursing here; borrower still needs to accept before admin final disburse steps.
+ * Status Flow:
+ *   pending → approved_pending_disburse → approved → active → completed
+ *                     ↘ borrower_rejected
+ *                     ↘ rejected
  */
 
-// -------------------------------------------------------------
-// GET /api/admin/pending
-// List pending loan applications (status = 'pending')
-// -------------------------------------------------------------
+// ---------------------------------------------------------
+// GET ALL PENDING LOANS
+// ---------------------------------------------------------
 router.get("/pending", auth, admin, async (req, res) => {
   try {
-    console.log(LOG_PREFIX, "GET /api/admin/pending called by:", req.user?.id || "unknown");
+    console.log(LOG_PREFIX, "Fetching pending loans...");
 
     const q = await db.query(
       `
@@ -36,6 +33,7 @@ router.get("/pending", auth, admin, async (req, res) => {
         l.user_id,
         u.full_name AS borrower_name,
         u.email AS borrower_email,
+        l.phone_number AS borrower_phone,
         l.principal,
         l.amount_requested,
         l.total_payable,
@@ -49,90 +47,88 @@ router.get("/pending", auth, admin, async (req, res) => {
         l.status
       FROM loans l
       JOIN users u ON u.id = l.user_id
-      WHERE LOWER(COALESCE(l.status, '')) = 'pending'
+      WHERE LOWER(l.status) = 'pending'
       ORDER BY l.created_at ASC
-      LIMIT 1000
+      LIMIT 200
       `
     );
 
-    console.log(LOG_PREFIX, `Pending loans returned: count=${q.rows.length}`);
-    return res.json(q.rows || []);
+    return res.json(q.rows);
   } catch (err) {
-    console.error(LOG_PREFIX, "❌ GET /pending ERROR:", err);
-    return res.status(500).json({ error: "Server error", details: err.message });
+    console.error(LOG_PREFIX, "❌ Pending loans error:", err);
+    return res.status(500).json({
+      error: "Server error",
+      details: err.message,
+    });
   }
 });
 
-// -------------------------------------------------------------
-// POST /api/admin/approve/:loanId
-// Admin approves loan — sets approved_* fields and status = 'approved_pending_disburse'
-// Body: { approved_principal: number }
-// -------------------------------------------------------------
+// ---------------------------------------------------------
+// ADMIN APPROVES LOAN (FULL APPROVAL WITH approved_* FIELDS)
+// ---------------------------------------------------------
 router.post("/approve/:loanId", auth, admin, async (req, res) => {
   const loanId = req.params.loanId;
-  const rawApproved = req.body?.approved_principal;
 
-  console.log(LOG_PREFIX, "Approve request:", { loanId, adminId: req.user?.id });
-
-  if (!loanId) {
-    return res.status(400).json({ error: "MISSING_LOAN_ID" });
-  }
-
-  if (typeof rawApproved === "undefined" || rawApproved === null) {
-    return res.status(400).json({ error: "MISSING_APPROVED_PRINCIPAL", message: "approved_principal is required" });
-  }
-
-  const approved_principal = Number(rawApproved);
-
-  if (!isFinite(approved_principal) || approved_principal <= 0) {
-    return res.status(400).json({ error: "INVALID_APPROVED_PRINCIPAL", message: "approved_principal must be a positive number" });
-  }
+  console.log(LOG_PREFIX, "Approve request received:", {
+    loanId,
+    approved_principal: req.body?.approved_principal,
+  });
 
   const client = await db.connect();
   try {
     await client.query("BEGIN");
 
-    // Fetch loan FOR UPDATE
-    const loanQ = await client.query(`SELECT * FROM loans WHERE id = $1 LIMIT 1 FOR UPDATE`, [loanId]);
+    const loanQ = await client.query(`SELECT * FROM loans WHERE id = $1 FOR UPDATE`, [loanId]);
+
     if (loanQ.rows.length === 0) {
       await client.query("ROLLBACK");
-      console.warn(LOG_PREFIX, "Loan not found:", loanId);
       return res.status(404).json({ error: "Loan not found" });
     }
 
     const loan = loanQ.rows[0];
 
-    // Only allow admin approve when loan is pending
-    const curStatus = (loan.status || "").toLowerCase();
-    if (curStatus !== "pending") {
+    if ((loan.status || "").toLowerCase() !== "pending") {
       await client.query("ROLLBACK");
-      console.warn(LOG_PREFIX, "Cannot approve loan with current status:", loan.id, loan.status);
-      return res.status(400).json({ error: "INVALID_STATUS", message: `Loan must be in 'pending' to approve (current: ${loan.status})` });
-    }
-
-    // Determine original requested principal
-    const original_principal = Number(loan.amount_requested ?? loan.principal ?? 0);
-
-    if (approved_principal > original_principal) {
-      await client.query("ROLLBACK");
-      console.warn(LOG_PREFIX, "Approved principal exceeds requested amount:", { approved_principal, original_principal });
       return res.status(400).json({
-        error: "APPROVED_EXCEEDS_REQUESTED",
-        message: "approved_principal cannot be greater than the original requested principal",
+        error: "INVALID_STATUS",
+        message: "Loan is not pending",
       });
     }
 
-    // Compute approved values (20% flat interest)
-    const approved_interest = Number((approved_principal * 0.20).toFixed(2));
-    const approved_total_payable = Number((approved_principal + approved_interest).toFixed(2));
+    const requested = Number(loan.amount_requested ?? loan.principal);
 
-    const days = Number(loan.days || 0);
-    const approved_daily_payment = days > 0 ? Number((approved_total_payable / days).toFixed(2)) : approved_total_payable;
+    const approvedPrincipal = Number(req.body?.approved_principal);
+
+    if (!approvedPrincipal || approvedPrincipal <= 0) {
+      await client.query("ROLLBACK");
+      return res.status(400).json({ error: "Invalid approved_principal" });
+    }
+
+    if (approvedPrincipal > requested) {
+      await client.query("ROLLBACK");
+      return res.status(400).json({
+        error: "APPROVED_EXCEEDS_REQUESTED",
+        message: `Approved amount cannot exceed requested amount ₱${requested}`,
+      });
+    }
+
+    // Compute approved_* values
+    const approvedInterest = Number((approvedPrincipal * 0.20).toFixed(2));
+    const approvedTotalPayable = Number((approvedPrincipal + approvedInterest).toFixed(2));
+    const days = Number(loan.days);
+    const approvedDailyPayment =
+      days > 0 ? Number((approvedTotalPayable / days).toFixed(2)) : approvedTotalPayable;
+
+    console.log(LOG_PREFIX, "Computed approved values:", {
+      approvedPrincipal,
+      approvedInterest,
+      approvedTotalPayable,
+      approvedDailyPayment,
+    });
 
     const now = new Date().toISOString();
 
-    // Update loan with approved_* and set status to approved_pending_disburse
-    const updateRes = await client.query(
+    await client.query(
       `
       UPDATE loans
       SET
@@ -143,80 +139,73 @@ router.post("/approve/:loanId", auth, admin, async (req, res) => {
         approved_at = $5,
         status = 'approved_pending_disburse'
       WHERE id = $6
-      RETURNING id, user_id, status, approved_principal, approved_interest, approved_total_payable, approved_daily_payment, approved_at
       `,
       [
-        approved_principal,
-        approved_interest,
-        approved_total_payable,
-        approved_daily_payment,
+        approvedPrincipal,
+        approvedInterest,
+        approvedTotalPayable,
+        approvedDailyPayment,
         now,
         loanId,
       ]
     );
 
-    if (updateRes.rows.length === 0) {
-      await client.query("ROLLBACK");
-      console.error(LOG_PREFIX, "Failed to update loan (approve):", loanId);
-      return res.status(500).json({ error: "UPDATE_FAILED" });
-    }
-
     await client.query("COMMIT");
 
-    console.log(LOG_PREFIX, "Loan approved (pending borrower acceptance):", loanId);
+    console.log(LOG_PREFIX, "Loan approved (pending borrower acceptance).");
+
     return res.json({
       message: "Loan approved (awaiting borrower acceptance)",
-      loan: updateRes.rows[0],
+      loanId,
+      approved_principal: approvedPrincipal,
+      approved_interest: approvedInterest,
+      approved_total_payable: approvedTotalPayable,
+      approved_daily_payment: approvedDailyPayment,
+      approved_at: now,
     });
   } catch (err) {
-    try {
-      await client.query("ROLLBACK");
-    } catch (rbErr) {
-      console.error(LOG_PREFIX, "Rollback failed:", rbErr);
-    }
-    console.error(LOG_PREFIX, "❌ Approve loan error:", err);
-    return res.status(500).json({ error: "Server error", details: err.message });
+    console.error(LOG_PREFIX, "❌ Approve error:", err);
+    await client.query("ROLLBACK");
+    return res.status(500).json({
+      error: "Server error",
+      details: err.message,
+    });
   } finally {
     client.release();
   }
 });
 
-// -------------------------------------------------------------
-// POST /api/admin/reject/:loanId
-// Admin rejects a loan (status = 'rejected')
-// Body optional: { reason: string }
-// -------------------------------------------------------------
+// ---------------------------------------------------------
+// ADMIN REJECTS LOAN
+// ---------------------------------------------------------
 router.post("/reject/:loanId", auth, admin, async (req, res) => {
   const loanId = req.params.loanId;
-  const reason = req.body?.reason || null;
-
-  if (!loanId) {
-    return res.status(400).json({ error: "MISSING_LOAN_ID" });
-  }
 
   try {
-    // Only set status to 'rejected' if loan exists
     const now = new Date().toISOString();
-    const update = await db.query(
-      `UPDATE loans
-       SET status = 'rejected',
-           rejected_at = $1,
-           rejection_reason = COALESCE($2, rejection_reason)
-       WHERE id = $3
-       RETURNING id, status, rejected_at, rejection_reason`,
-      [now, reason, loanId]
+
+    const q = await db.query(
+      `
+      UPDATE loans
+      SET status = 'rejected',
+          rejected_at = $1
+      WHERE id = $2
+      RETURNING id
+      `,
+      [now, loanId]
     );
 
-    if (!update.rows.length) {
-      console.warn(LOG_PREFIX, "Reject attempted but loan not found:", loanId);
+    if (!q.rows.length) {
       return res.status(404).json({ error: "Loan not found" });
     }
 
-    console.log(LOG_PREFIX, "Loan rejected by admin:", loanId, "reason:", reason || "(none)");
-    return res.json({ message: "Loan rejected", loan: update.rows[0] });
+    return res.json({ message: "Loan rejected", loanId });
   } catch (err) {
-    console.error(LOG_PREFIX, "❌ Reject loan error:", err);
-    return res.status(500).json({ error: "Server error", details: err.message });
+    console.error(LOG_PREFIX, "❌ Reject error:", err);
+    return res.status(500).json({
+      error: "Server error",
+      details: err.message,
+    });
   }
 });
 
