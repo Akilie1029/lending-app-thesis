@@ -4,9 +4,13 @@ const router = express.Router();
 const db = require("../db");
 const auth = require("../authMiddleware");
 const { recalcLoanRemainingBalance } = require("../services/repaymentEngine");
-const axios = require("axios");
 
-const BASE_URL = process.env.API_BASE_URL || "http://localhost:5001";
+// --------------------------------------------------------
+// NOTIFICATIONS DISABLED (safe no-op)
+// --------------------------------------------------------
+async function pushNotification() {
+  return;
+}
 
 /**
  * POST /api/repayments/pay
@@ -15,14 +19,13 @@ const BASE_URL = process.env.API_BASE_URL || "http://localhost:5001";
  *  - amount (number)
  *  - payment_method (string, optional)
  *
- * Behavior:
- *  - Validates loan exists and belongs to authenticated user
- *  - Prevents double-payments on completed loans
- *  - Inserts transaction and repayment_history inside a DB transaction
- *  - Updates loans.remaining_balance and status (completed if remaining <= 0)
- *  - Sends notifications:
- *      • loan_payment
- *      • loan_completed (if remaining <= 0)
+ * Normal loan repayment flow:
+ *  ✓ Insert transaction
+ *  ✓ Insert repayment_history
+ *  ✓ Recalculate remaining_balance
+ *  ✓ Mark loan as completed if fully paid
+ *
+ * Notifications are disabled for stability.
  */
 
 router.post("/pay", auth, async (req, res) => {
@@ -50,9 +53,9 @@ router.post("/pay", auth, async (req, res) => {
 
   try {
     await client.query("BEGIN");
-    console.log(`🔍 Verifying loan ownership and status for loanId=${loanId} user=${userId}`);
+    console.log(`🔍 Verifying loan for loanId=${loanId} user=${userId}`);
 
-    // Verify loan exists and belongs to the user
+    // Check loan ownership
     const loanQ = await client.query(
       `SELECT * FROM loans WHERE id = $1 AND user_id = $2 LIMIT 1 FOR UPDATE`,
       [loanId, userId]
@@ -60,15 +63,16 @@ router.post("/pay", auth, async (req, res) => {
 
     if (loanQ.rows.length === 0) {
       await client.query("ROLLBACK");
-      console.warn("⚠️ Loan not found or not owned by user:", { loanId, userId });
+      console.warn("⚠️ Loan not found or unauthorized:", { loanId, userId });
       return res.status(404).json({ error: "Loan not found" });
     }
 
     const loan = loanQ.rows[0];
 
-    // Determine remaining balance
     const remainingBefore = Number(
-      loan.remaining_balance != null ? loan.remaining_balance : loan.total_payable || 0
+      loan.remaining_balance != null
+        ? loan.remaining_balance
+        : loan.total_payable || 0
     );
 
     if (remainingBefore <= 0) {
@@ -82,14 +86,13 @@ router.post("/pay", auth, async (req, res) => {
       });
     }
 
-    // If payment amount is greater than remaining, allow but cap
     const appliedAmount = Math.min(payAmount, remainingBefore);
 
     console.log(
-      `💳 Applying payment: loanId=${loanId} amount=${appliedAmount} (requested=${payAmount}) remainingBefore=${remainingBefore}`
+      `💳 Applying payment: loan=${loanId} pay=${appliedAmount} requested=${payAmount} remaining=${remainingBefore}`
     );
 
-    // 1) Insert transaction
+    // Insert transaction
     const txRes = await client.query(
       `
       INSERT INTO transactions (user_id, loan_id, type, amount, payment_method, created_at)
@@ -102,7 +105,7 @@ router.post("/pay", auth, async (req, res) => {
     const transaction = txRes.rows[0];
     console.log("✅ Transaction inserted:", transaction.id);
 
-    // 2) Insert repayment_history
+    // Insert repayment_history
     const rhRes = await client.query(
       `
       INSERT INTO repayment_history (loan_id, user_id, amount, created_at)
@@ -115,50 +118,27 @@ router.post("/pay", auth, async (req, res) => {
     const repayment = rhRes.rows[0];
     console.log("✅ Repayment history inserted:", repayment.id);
 
-    // 3) Recalculate remaining
+    // Recalculate remaining balance
     const newRemaining = await recalcLoanRemainingBalance(loanId);
 
-    console.log(`🔁 Remaining balance recalculated: ${newRemaining} (loanId=${loanId})`);
+    console.log(`🔁 New remaining balance: ${newRemaining}`);
 
-    // 4) Fetch updated loan row
-    const updatedLoanRes = await client.query(`SELECT * FROM loans WHERE id = $1 LIMIT 1`, [loanId]);
+    // Fetch updated loan
+    const updatedLoanRes = await client.query(
+      `SELECT * FROM loans WHERE id = $1 LIMIT 1`,
+      [loanId]
+    );
     const updatedLoan = updatedLoanRes.rows[0];
 
     await client.query("COMMIT");
 
-    console.log("✅ Payment flow COMMIT complete for loanId=", loanId);
+    console.log("✅ Payment flow complete for loanId=", loanId);
 
-    // ------------------------------------------------------------------
-    // 🔔 NOTIFICATION #1 — Payment Successful
-    // ------------------------------------------------------------------
-    try {
-      await axios.post(`${BASE_URL}/api/notifications/push`, {
-        user_id: userId,
-        loan_id: loanId,
-        type: "loan_payment",
-        title: "Payment Received",
-        message: `Your payment of ₱${appliedAmount.toLocaleString()} has been posted.`,
-      });
-    } catch (err) {
-      console.error("❌ Payment notification failed:", err);
-    }
-
-    // ------------------------------------------------------------------
-    // 🔔 NOTIFICATION #2 — Loan Fully Paid (if remaining <= 0)
-    // ------------------------------------------------------------------
-    if (newRemaining <= 0) {
-      try {
-        await axios.post(`${BASE_URL}/api/notifications/push`, {
-          user_id: userId,
-          loan_id: loanId,
-          type: "loan_completed",
-          title: "Loan Completed",
-          message: "Congratulations! Your loan is now fully paid.",
-        });
-      } catch (err) {
-        console.error("❌ Loan completed notification failed:", err);
-      }
-    }
+    // --------------------------------------------------------
+    // Notifications DISABLED (no-op)
+    // --------------------------------------------------------
+    pushNotification();
+    if (newRemaining <= 0) pushNotification();
 
     return res.json({
       success: true,
@@ -181,14 +161,14 @@ router.post("/pay", auth, async (req, res) => {
     try {
       await client.query("ROLLBACK");
     } catch (rbErr) {
-      console.error("❌ Error rolling back payment transaction:", rbErr);
+      console.error("❌ Error rolling back:", rbErr);
     }
     return res.status(500).json({ error: "Server error", details: err.message });
   } finally {
     try {
       client.release();
     } catch (releaseErr) {
-      console.error("❌ Error releasing DB client after payment:", releaseErr);
+      console.error("❌ Error releasing DB client:", releaseErr);
     }
   }
 });
