@@ -22,7 +22,6 @@ const dashboardRoutes = require("./routes/loanDashboard");
 const adminRoutes = require("./routes/admin");
 const adminLoanApprovals = require("./routes/adminLoanApprovals");
 const adminDisbursement = require("./routes/adminDisbursement");
-const adminApprovedLoans = require("./routes/adminApprovedLoans");
 const adminAllLoans = require("./routes/adminAllLoans");
 
 // Additional Admin Modules
@@ -177,7 +176,6 @@ app.use("/api/dashboard", dashboardRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/admin", adminLoanApprovals);
 app.use("/api/admin", adminDisbursement);
-app.use("/api/admin", adminApprovedLoans);
 app.use("/api/admin", adminAllLoans);
 
 app.use("/api/admin", adminLoanDetails);
