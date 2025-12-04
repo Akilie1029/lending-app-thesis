@@ -1,3 +1,4 @@
+// src/screens/AccountSettingsScreen.tsx
 import React, { useEffect, useState } from "react";
 import {
   View,
@@ -9,6 +10,7 @@ import {
   ActivityIndicator,
   Alert,
   Image,
+  Platform,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import axios from "axios";
@@ -19,12 +21,13 @@ import { API_BASE } from "../config";
 export default function AccountSettingsScreen({ navigation }: any) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [uploading, setUploading] = useState(false);
 
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
-  const [photo, setPhoto] = useState<string | null>(null);
+  const [profilePhotoUrl, setProfilePhotoUrl] = useState<string | null>(null);
 
-  // Password fields
+  // Change password fields
   const [pass1, setPass1] = useState("");
   const [pass2, setPass2] = useState("");
 
@@ -32,151 +35,79 @@ export default function AccountSettingsScreen({ navigation }: any) {
     loadProfile();
   }, []);
 
-  // ------------------------------------------------------
-  // LOAD PROFILE (including stored profile_photo_url)
-  // ------------------------------------------------------
+  const getAuthHeaders = async () => {
+    const token = await AsyncStorage.getItem("userToken");
+    return { Authorization: `Bearer ${token}` };
+  };
+
   const loadProfile = async () => {
     try {
-      const token = await AsyncStorage.getItem("userToken");
-      if (!token) return;
-
-      const res = await axios.get(`${API_BASE}/auth/me`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-
+      setLoading(true);
+      const headers = await getAuthHeaders();
+      const res = await axios.get(`${API_BASE}/auth/me`, { headers });
       const user = res.data;
-
       setFullName(user.full_name || "");
       setEmail(user.email || "");
-      setPhoto(user.profile_photo_url || null);
+      setProfilePhotoUrl(user.profile_photo_url || null);
     } catch (err) {
+      console.error("Settings load error:", err);
       Alert.alert("Error", "Failed to load profile.");
     } finally {
       setLoading(false);
     }
   };
 
-  // ------------------------------------------------------
-  // PICK PHOTO
-  // ------------------------------------------------------
-  const pickProfilePhoto = async () => {
-    const res = await launchImageLibrary({
-      mediaType: "photo",
-      quality: 0.85,
-    });
-
-    if (res.didCancel) return;
-    if (!res.assets?.[0]) return;
-
-    const a = res.assets[0];
-
-    uploadProfilePhoto(a.uri!);
-  };
-
-  // ------------------------------------------------------
-  // UPLOAD PHOTO → /upload/profile-photo
-  // ------------------------------------------------------
-  const uploadProfilePhoto = async (uri: string) => {
-    try {
-      setSaving(true);
-
-      const form = new FormData();
-      form.append("file", {
-        uri,
-        name: `profile_${Date.now()}.jpg`,
-        type: "image/jpeg",
-      } as any);
-
-      const token = await AsyncStorage.getItem("userToken");
-
-      const res = await fetch(`${API_BASE}/upload/profile-photo`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "multipart/form-data",
-        },
-        body: form,
-      });
-
-      const json = await res.json();
-
-      if (!res.ok) throw new Error(json.error || "Upload failed");
-
-      // server returns { document: { url, public_id, ... } }
-      const url = json.document.url;
-
-      // update local state
-      setPhoto(url);
-
-      // also save in user table
-      await axios.put(
-        `${API_BASE}/auth/update-profile`,
-        { profile_photo_url: url },
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-
-      Alert.alert("Updated", "Profile photo updated.");
-    } catch (err: any) {
-      Alert.alert("Error", err.message || "Upload failed.");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  // ------------------------------------------------------
-  // SAVE NAME ONLY
-  // ------------------------------------------------------
   const saveChanges = async () => {
     if (!fullName) return Alert.alert("Error", "Name cannot be empty.");
 
     setSaving(true);
     try {
-      const token = await AsyncStorage.getItem("userToken");
-
-      await axios.put(
+      const headers = await getAuthHeaders();
+      const res = await axios.put(
         `${API_BASE}/auth/update-profile`,
-        { full_name: fullName, profile_photo_url: photo },
-        { headers: { Authorization: `Bearer ${token}` } }
+        { full_name: fullName },
+        { headers }
       );
+
+      // Update local profilePhotoUrl if backend returned user
+      if (res.data?.user?.profile_photo_url) {
+        setProfilePhotoUrl(res.data.user.profile_photo_url);
+      }
 
       Alert.alert("Updated", "Your profile has been updated.");
     } catch (err) {
+      console.error("Update profile error:", err);
       Alert.alert("Error", "Could not update profile.");
     } finally {
       setSaving(false);
     }
   };
 
-  // ------------------------------------------------------
-  // CHANGE PASSWORD
-  // ------------------------------------------------------
   const changePassword = async () => {
     if (!pass1 || !pass2) return Alert.alert("Error", "Enter both password fields.");
     if (pass1 !== pass2) return Alert.alert("Error", "Passwords do not match.");
+    if (pass1.length < 6) return Alert.alert("Error", "Password must be at least 6 characters.");
 
     setSaving(true);
     try {
-      const token = await AsyncStorage.getItem("userToken");
-
+      const headers = await getAuthHeaders();
       await axios.put(
         `${API_BASE}/auth/change-password`,
         { new_password: pass1 },
-        { headers: { Authorization: `Bearer ${token}` } }
+        { headers }
       );
 
+      Alert.alert("Success", "Password updated.");
       setPass1("");
       setPass2("");
-      Alert.alert("Success", "Password updated.");
     } catch (err) {
+      console.error("Change password error:", err);
       Alert.alert("Error", "Failed to update password.");
     } finally {
       setSaving(false);
     }
   };
 
-  // ------------------------------------------------------
-  // LOGOUT
-  // ------------------------------------------------------
   const logout = () => {
     Alert.alert("Confirm Logout", "Are you sure you want to logout?", [
       { text: "Cancel", style: "cancel" },
@@ -191,6 +122,80 @@ export default function AccountSettingsScreen({ navigation }: any) {
     ]);
   };
 
+  // ------------------- PROFILE PHOTO UPLOAD --------------------
+  const pickProfilePhoto = async () => {
+    try {
+      const res = await launchImageLibrary({
+        mediaType: "photo",
+        quality: 0.8,
+      });
+
+      if (!res.didCancel && res.assets?.[0]) {
+        const a = res.assets[0];
+        await uploadProfilePhoto(a.uri!, a.fileName || `profile_${Date.now()}.jpg`, a.type || "image/jpeg");
+      }
+    } catch (err) {
+      console.error("Pick photo error:", err);
+      Alert.alert("Error", "Unable to pick photo.");
+    }
+  };
+
+  const uploadProfilePhoto = async (uri: string, fileName: string, type: string) => {
+    setUploading(true);
+    try {
+      const token = await AsyncStorage.getItem("userToken");
+      if (!token) throw new Error("Not authenticated");
+
+      const form = new FormData();
+      // On Android the file uri is good. On iOS prefix 'file://'
+      const normalizedUri = Platform.OS === "ios" && !uri.startsWith("file://") ? `file://${uri}` : uri;
+
+      form.append("file", {
+        uri: normalizedUri,
+        name: fileName,
+        type,
+      } as any);
+
+      const res = await fetch(`${API_BASE}/upload/profile-photo`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "multipart/form-data",
+        },
+        body: form,
+      });
+
+      const json = await res.json();
+      if (!res.ok) {
+        console.error("Upload failed response:", json);
+        throw new Error(json.error || "Upload failed");
+      }
+
+      // Server returns profile_photo_url in response
+      const newUrl = json.profile_photo_url || (json.document && json.document.url) || null;
+      if (newUrl) {
+        setProfilePhotoUrl(newUrl);
+
+        // Also update users table via update-profile to keep user API consistent (optional)
+        try {
+          const headers = await getAuthHeaders();
+          await axios.put(`${API_BASE}/auth/update-profile`, { profile_photo_url: newUrl }, { headers });
+        } catch (uErr) {
+          console.warn("Failed to call update-profile after photo upload (non-fatal):", uErr);
+        }
+
+        Alert.alert("Success", "Profile photo updated.");
+      } else {
+        Alert.alert("Success", "Profile uploaded.");
+      }
+    } catch (err) {
+      console.error("Profile upload error:", err);
+      Alert.alert("Upload failed", err?.message || "Upload failed");
+    } finally {
+      setUploading(false);
+    }
+  };
+
   if (loading) {
     return (
       <View style={styles.center}>
@@ -201,7 +206,6 @@ export default function AccountSettingsScreen({ navigation }: any) {
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 40 }}>
-      {/* HEADER */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()}>
           <Icon name="arrow-back" size={26} color="#fff" />
@@ -210,22 +214,27 @@ export default function AccountSettingsScreen({ navigation }: any) {
         <View style={{ width: 32 }} />
       </View>
 
-      {/* PROFILE CARD */}
       <View style={styles.card}>
-        <Text style={styles.cardTitle}>Profile Photo</Text>
+        <Text style={styles.cardTitle}>Profile</Text>
 
-        <View style={styles.avatarContainer}>
+        <View style={{ alignItems: "center", marginBottom: 12 }}>
           <Image
             source={{
-              uri:
-                photo ||
-                "https://cdn-icons-png.flaticon.com/512/149/149071.png",
+              uri: profilePhotoUrl || "https://cdn-icons-png.flaticon.com/512/149/149071.png",
             }}
             style={styles.avatar}
           />
 
-          <TouchableOpacity style={styles.changePhotoBtn} onPress={pickProfilePhoto}>
-            <Text style={styles.changePhotoText}>Change Photo</Text>
+          <TouchableOpacity
+            style={styles.uploadSmallBtn}
+            onPress={pickProfilePhoto}
+            disabled={uploading}
+          >
+            {uploading ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <Text style={styles.uploadSmallText}>Change Photo</Text>
+            )}
           </TouchableOpacity>
         </View>
 
@@ -243,7 +252,6 @@ export default function AccountSettingsScreen({ navigation }: any) {
         </TouchableOpacity>
       </View>
 
-      {/* PASSWORD CARD */}
       <View style={styles.card}>
         <Text style={styles.cardTitle}>Change Password</Text>
 
@@ -268,7 +276,6 @@ export default function AccountSettingsScreen({ navigation }: any) {
         </TouchableOpacity>
       </View>
 
-      {/* LOGOUT */}
       <TouchableOpacity style={styles.logoutBtn} onPress={logout}>
         <Text style={styles.logoutText}>Logout</Text>
       </TouchableOpacity>
@@ -299,25 +306,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     elevation: 3,
   },
-
   cardTitle: { fontWeight: "800", marginBottom: 10, fontSize: 15 },
-
-  avatarContainer: { alignItems: "center", marginBottom: 15 },
-  avatar: {
-    width: 120,
-    height: 120,
-    borderRadius: 60,
-    borderWidth: 3,
-    borderColor: "#169AF9",
-  },
-  changePhotoBtn: {
-    marginTop: 10,
-    backgroundColor: "#169AF9",
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 8,
-  },
-  changePhotoText: { color: "#fff", fontWeight: "700" },
 
   input: {
     borderWidth: 1,
@@ -325,6 +314,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     padding: 10,
     marginBottom: 12,
+    backgroundColor: "#fff",
   },
 
   saveBtn: {
@@ -344,4 +334,22 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   logoutText: { color: "#fff", fontWeight: "800" },
+
+  avatar: {
+    width: 110,
+    height: 110,
+    borderRadius: 55,
+    borderWidth: 2,
+    borderColor: "#0367A6",
+    marginBottom: 8,
+  },
+
+  uploadSmallBtn: {
+    marginTop: 6,
+    backgroundColor: "#0A9EFA",
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+  },
+  uploadSmallText: { color: "#fff", fontWeight: "700" },
 });

@@ -135,6 +135,10 @@ app.post("/api/auth/login", async (req, res) => {
         full_name: user.full_name,
         email: user.email,
         role: safeRole,
+        profile_photo_url: user.profile_photo_url || null,
+        verification_status: user.verification_status || null,
+        payout_method: user.payout_method || null,
+        payout_details: user.payout_details || null,
       },
     });
   } catch (err) {
@@ -143,10 +147,12 @@ app.post("/api/auth/login", async (req, res) => {
   }
 });
 
+// Return authenticated user details (expanded)
 app.get("/api/auth/me", authMiddleware, async (req, res) => {
   try {
     const rs = await db.query(
-      `SELECT id, email, full_name, role FROM users WHERE id = $1`,
+      `SELECT id, email, full_name, role, profile_photo_url, verification_status, payout_method, payout_details
+       FROM users WHERE id = $1`,
       [req.user.id]
     );
 
@@ -160,6 +166,73 @@ app.get("/api/auth/me", authMiddleware, async (req, res) => {
   } catch (err) {
     console.error("/auth/me ERROR:", err);
     res.status(500).json({ error: "Server error" });
+  }
+});
+
+// Update profile (full_name and optional profile_photo_url)
+// Expects JSON: { full_name?: string, profile_photo_url?: string }
+app.put("/api/auth/update-profile", authMiddleware, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { full_name, profile_photo_url, payout_method, payout_details } = req.body || {};
+
+    if (!full_name && !profile_photo_url && !payout_method && !payout_details) {
+      return res.status(400).json({ error: "No fields to update" });
+    }
+
+    // Build dynamic query
+    const updates = [];
+    const values = [];
+    let idx = 1;
+
+    if (full_name != null) {
+      updates.push(`full_name = $${idx++}`);
+      values.push(full_name);
+    }
+    if (profile_photo_url != null) {
+      updates.push(`profile_photo_url = $${idx++}`);
+      values.push(profile_photo_url);
+    }
+    if (payout_method != null) {
+      updates.push(`payout_method = $${idx++}`);
+      values.push(payout_method);
+    }
+    if (payout_details != null) {
+      updates.push(`payout_details = $${idx++}`);
+      values.push(payout_details);
+    }
+
+    values.push(userId);
+
+    const sql = `UPDATE users SET ${updates.join(", ")} WHERE id = $${idx} RETURNING id, email, full_name, profile_photo_url, payout_method, payout_details, role`;
+    const upd = await db.query(sql, values);
+
+    return res.json({ user: upd.rows[0] });
+  } catch (err) {
+    console.error("/auth/update-profile ERROR:", err);
+    res.status(500).json({ error: "Server error", details: err.message });
+  }
+});
+
+// Change password
+// Note: frontend currently only sends new_password (no old password). We'll support new_password only
+app.put("/api/auth/change-password", authMiddleware, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { new_password } = req.body || {};
+
+    if (!new_password || new_password.length < 6) {
+      return res.status(400).json({ error: "new_password must be at least 6 characters" });
+    }
+
+    const hash = await bcrypt.hash(new_password, 10);
+
+    await db.query(`UPDATE users SET password_hash = $1 WHERE id = $2`, [hash, userId]);
+
+    return res.json({ message: "Password updated" });
+  } catch (err) {
+    console.error("/auth/change-password ERROR:", err);
+    res.status(500).json({ error: "Server error", details: err.message });
   }
 });
 

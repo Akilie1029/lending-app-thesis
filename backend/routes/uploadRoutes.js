@@ -12,18 +12,13 @@ const upload = multer({ storage: multer.memoryStorage() });
 /**
  * Upload routes (user & admin)
  *
- * - All IDs are treated as strings (UUIDs) — do NOT cast to Number()
- * - Responses are consistent and include helpful debug info
- * - Uses uploadBufferToCloudinary(buffer, { folder }) which should return:
- *    { secure_url, public_id, format, bytes }
- *
  * Endpoints:
- *  - POST /valid-id            (auth)         -> upload gov ID for loan application
- *  - POST /id-selfie           (auth)         -> upload selfie with ID for loan application
- *  - POST /proof-income        (auth)         -> upload proof of income for loan application
- *  - POST /profile-photo       (auth)         -> upload / replace profile photo (user_documents)
- *  - POST /loan-document       (auth)         -> admin/user upload for existing loan (loan_documents)
- *  - GET  /admin/loan-documents/:loanId (auth+admin) -> list loan documents grouped by doc_type
+ *  - POST /valid-id            (auth)
+ *  - POST /id-selfie           (auth)
+ *  - POST /proof-income        (auth)
+ *  - POST /profile-photo       (auth) -> updates user_documents and users.profile_photo_url
+ *  - POST /loan-document       (auth)
+ *  - GET  /admin/loan-documents/:loanId (auth+admin)
  */
 
 // ----------------------------
@@ -153,11 +148,21 @@ router.post(
           [cloud.secure_url, cloud.public_id, cloud.format, cloud.bytes, old.id]
         );
 
+        // Also update users.profile_photo_url
+        try {
+          await db.query(`UPDATE users SET profile_photo_url = $1 WHERE id = $2`, [
+            cloud.secure_url,
+            userId,
+          ]);
+        } catch (uErr) {
+          console.warn("⚠️ Failed to update users.profile_photo_url:", uErr.message);
+        }
+
         console.log("✅ profile-photo updated in DB id=", upd.rows[0].id);
-        return res.json({ document: upd.rows[0] });
+        return res.json({ document: upd.rows[0], profile_photo_url: cloud.secure_url });
       }
 
-      // Insert new
+      // Insert new document
       const ins = await db.query(
         `INSERT INTO user_documents 
          (user_id, doc_type, url, public_id, file_format, file_size)
@@ -166,8 +171,18 @@ router.post(
         [userId, cloud.secure_url, cloud.public_id, cloud.format, cloud.bytes]
       );
 
+      // Update users.profile_photo_url
+      try {
+        await db.query(`UPDATE users SET profile_photo_url = $1 WHERE id = $2`, [
+          cloud.secure_url,
+          userId,
+        ]);
+      } catch (uErr) {
+        console.warn("⚠️ Failed to update users.profile_photo_url:", uErr.message);
+      }
+
       console.log("✅ profile-photo inserted in DB id=", ins.rows[0].id);
-      return res.json({ document: ins.rows[0] });
+      return res.json({ document: ins.rows[0], profile_photo_url: cloud.secure_url });
     } catch (err) {
       console.error("❌ profile-photo upload error:", err);
       return res.status(500).json({ error: "Upload failed", details: err.message });

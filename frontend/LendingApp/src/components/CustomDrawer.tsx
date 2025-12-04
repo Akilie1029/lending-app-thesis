@@ -18,7 +18,6 @@ const LOG_PREFIX = "[DRAWER]";
 const CustomDrawer = (props: any) => {
   const [user, setUser] = useState<any>(null);
 
-  // NEW unified loan state
   const [hasUnfinishedLoan, setHasUnfinishedLoan] = useState(false);
   const [hasAnyLoan, setHasAnyLoan] = useState(false);
 
@@ -31,26 +30,22 @@ const CustomDrawer = (props: any) => {
         return;
       }
 
-      // --- Fetch user ---
+      // -------------------------------
+      // LOAD USER
+      // -------------------------------
       const me = await api.get("/auth/me");
       setUser(me.data);
+
       console.log(LOG_PREFIX, "Loaded user:", me.data?.email);
 
-      // --- Fetch ALL loans (needed to correctly detect states) ---
+      // -------------------------------
+      // LOAD ALL LOANS
+      // -------------------------------
       const allLoansRes = await api.get("/loans/my-loans");
       const allLoans = allLoansRes.data || [];
-      console.debug(LOG_PREFIX, "allLoans fetched:", allLoans);
 
       setHasAnyLoan(allLoans.length > 0);
 
-      // --- Correct loan eligibility logic ---
-      // We treat "unfinished" as any loan that prevents creating a new application:
-      // - status = 'pending' (under review)
-      // - status = 'approved_pending_disburse' (approved, awaiting borrower acceptance)
-      // - status = 'approved' and not disbursed (admin approved but not disbursed / borrower may need to accept)
-      // - status = 'active' (already disbursed / running)
-      //
-      // Additionally: if admin already approved a reduced amount (approved_principal > 0) but status is 'approved_pending_disburse' or 'approved', that still counts as unfinished.
       const unfinished = allLoans.some((loan: any) => {
         const st = (loan.status || "").toLowerCase();
 
@@ -58,10 +53,11 @@ const CustomDrawer = (props: any) => {
           st === "approved" && !loan.disbursed_at;
 
         const approvedPendingBorrower =
-          st === "approved_pending_disburse" || st === "approved_pending_disbursement";
+          st === "approved_pending_disburse" ||
+          st === "approved_pending_disbursement";
 
-        // If approved_principal present and > 0, treat as awaiting borrower/admin action if not disbursed
-        const adminApprovedAmountAssigned = Number(loan.approved_principal || 0) > 0;
+        const adminApprovedAmountAssigned =
+          Number(loan.approved_principal || 0) > 0;
 
         return (
           st === "pending" ||
@@ -73,9 +69,17 @@ const CustomDrawer = (props: any) => {
       });
 
       setHasUnfinishedLoan(unfinished);
-      console.log(LOG_PREFIX, `hasAnyLoan=${allLoans.length > 0} hasUnfinishedLoan=${unfinished}`);
+
+      console.log(
+        LOG_PREFIX,
+        `hasAnyLoan=${allLoans.length > 0} hasUnfinishedLoan=${unfinished}`
+      );
     } catch (err) {
-      console.error(LOG_PREFIX, "❌ Drawer load error:", err?.response?.data || err.message);
+      console.error(
+        LOG_PREFIX,
+        "❌ Drawer load error:",
+        err?.response?.data || err.message
+      );
     }
   }, [props.navigation]);
 
@@ -89,6 +93,9 @@ const CustomDrawer = (props: any) => {
     return unsubscribe;
   }, []);
 
+  // -------------------------------
+  // LOGOUT
+  // -------------------------------
   const handleLogout = () => {
     Alert.alert("Confirm Logout", "Are you sure you want to logout?", [
       { text: "Cancel", style: "cancel" },
@@ -106,29 +113,32 @@ const CustomDrawer = (props: any) => {
     ]);
   };
 
+  // -------------------------------
+  // PROFILE PHOTO LOGIC
+  // -------------------------------
+  const profilePhoto =
+    user?.profile_photo_url ||
+    "https://cdn-icons-png.flaticon.com/512/149/149071.png";
+
   return (
     <View style={{ flex: 1, backgroundColor: "#169AF9" }}>
-      {/* HEADER */}
+      {/* ===========================
+          HEADER (Logo + Profile)
+      ============================ */}
       <View style={styles.header}>
-        <Image
-          source={require("../../assets/logo.png")}
-          style={styles.logo}
-        />
+        <Image source={require("../../assets/logo.png")} style={styles.logo} />
 
-        <Image
-          source={{
-            uri:
-              user?.avatar ||
-              "https://cdn-icons-png.flaticon.com/512/149/149071.png",
-          }}
-          style={styles.avatar}
-        />
+        <Image source={{ uri: profilePhoto }} style={styles.avatar} />
 
-        <Text style={styles.userName}>{user?.full_name || "Loading..."}</Text>
+        <Text style={styles.userName}>
+          {user?.full_name || "Loading..."}
+        </Text>
         <Text style={styles.userEmail}>{user?.email || ""}</Text>
       </View>
 
-      {/* MENU */}
+      {/* ===========================
+          MENU
+      ============================ */}
       <DrawerContentScrollView
         {...props}
         contentContainerStyle={styles.drawerScroll}
@@ -146,7 +156,7 @@ const CustomDrawer = (props: any) => {
             <Text style={styles.menuText}>Dashboard</Text>
           </TouchableOpacity>
 
-          {/* Loan Application — only visible if user has NO unfinished loan */}
+          {/* Loan Application */}
           {!hasUnfinishedLoan && (
             <TouchableOpacity
               style={styles.menuItem}
@@ -191,7 +201,9 @@ const CustomDrawer = (props: any) => {
         </View>
       </DrawerContentScrollView>
 
-      {/* Bottom actions */}
+      {/* ===========================
+          FOOTER BUTTONS
+      ============================ */}
       <View style={styles.bottomSection}>
         <TouchableOpacity
           style={styles.bottomItem}
@@ -203,9 +215,7 @@ const CustomDrawer = (props: any) => {
 
         <TouchableOpacity style={styles.bottomItem} onPress={handleLogout}>
           <Icon name="logout" size={22} color="#FF3B30" />
-          <Text style={[styles.bottomText, { color: "#FF3B30" }]}>
-            Logout
-          </Text>
+          <Text style={[styles.bottomText, { color: "#FF3B30" }]}>Logout</Text>
         </TouchableOpacity>
       </View>
     </View>
@@ -214,7 +224,7 @@ const CustomDrawer = (props: any) => {
 
 export default CustomDrawer;
 
-/* --- Styles unchanged --- */
+/* --- KEEPING ALL YOUR ORIGINAL STYLES --- */
 const styles = StyleSheet.create({
   header: {
     alignItems: "center",
@@ -236,6 +246,7 @@ const styles = StyleSheet.create({
   },
   userName: { fontSize: 18, fontWeight: "700", color: "#fff" },
   userEmail: { fontSize: 13, color: "#f0f0f0" },
+
   drawerScroll: {
     backgroundColor: "#fff",
     marginHorizontal: 15,
@@ -245,7 +256,9 @@ const styles = StyleSheet.create({
     borderWidth: 3,
     borderColor: "#169AF9",
   },
+
   drawerItems: {},
+
   menuItem: {
     flexDirection: "row",
     alignItems: "center",
@@ -255,7 +268,13 @@ const styles = StyleSheet.create({
     borderBottomColor: "#f0f0f0",
     marginLeft: 5,
   },
-  menuText: { fontSize: 17, fontWeight: "500", marginLeft: 15, color: "#333" },
+  menuText: {
+    fontSize: 17,
+    fontWeight: "500",
+    marginLeft: 15,
+    color: "#333",
+  },
+
   bottomSection: {
     borderTopWidth: 2,
     borderTopColor: "#e0e0e0",
@@ -271,5 +290,10 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginVertical: 8,
   },
-  bottomText: { fontSize: 15, fontWeight: "600", color: "#169AF9", marginLeft: 10 },
+  bottomText: {
+    fontSize: 15,
+    fontWeight: "600",
+    color: "#169AF9",
+    marginLeft: 10,
+  },
 });
