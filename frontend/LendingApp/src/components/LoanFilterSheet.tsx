@@ -19,12 +19,20 @@ const SHEET_HEIGHT = Math.round(SCREEN_H * 0.8);
 
 type SortKey = "newest" | "oldest" | "amount_desc" | "amount_asc";
 
+/**
+ * UPDATED STATUS OPTIONS
+ * Now includes:
+ *  - approved_pending_disburse
+ *  - borrower_rejected
+ */
 export const STATUS_OPTIONS = [
   { key: "pending", label: "Pending", color: "#FFC107" },
+  { key: "approved_pending_disburse", label: "Approved (Awaiting Borrower)", color: "#D67F00" },
   { key: "approved", label: "Approved", color: "#169AF9" },
   { key: "active", label: "Active", color: "#19d06b" },
   { key: "paid", label: "Paid", color: "#7b61ff" },
-  { key: "rejected", label: "Rejected", color: "#ff4d4d" },
+  { key: "rejected", label: "Rejected (Admin)", color: "#ff4d4d" },
+  { key: "borrower_rejected", label: "Rejected (Borrower)", color: "#CC0000" },
 ];
 
 type Props = {
@@ -126,13 +134,13 @@ export default function LoanFilterSheet({
     } else if (option === "week") {
       const start = new Date(now);
       start.setDate(now.getDate() - 6);
-      setFromDate(new Date(start));
-      setToDate(new Date(now));
+      setFromDate(start);
+      setToDate(now);
     } else {
       const start = new Date(now);
       start.setDate(now.getDate() - 29);
-      setFromDate(new Date(start));
-      setToDate(new Date(now));
+      setFromDate(start);
+      setToDate(now);
     }
   };
 
@@ -152,7 +160,7 @@ export default function LoanFilterSheet({
         {/* Handle */}
         <View style={styles.handleBar} />
 
-        {/* Header (NO RESET BUTTON) */}
+        {/* Header */}
         <View style={styles.headerRow}>
           <Text style={styles.headerTitle}>Filter Loans</Text>
         </View>
@@ -169,9 +177,7 @@ export default function LoanFilterSheet({
               >
                 <Icon name="calendar-outline" size={18} color="#444" />
                 <Text style={styles.dateText}>
-                  {fromDate
-                    ? fromDate.toISOString().slice(0, 10)
-                    : "From"}
+                  {fromDate ? fromDate.toISOString().slice(0, 10) : "From"}
                 </Text>
               </TouchableOpacity>
 
@@ -187,30 +193,21 @@ export default function LoanFilterSheet({
             </View>
 
             <View style={styles.quickRow}>
-              <TouchableOpacity
-                style={styles.quickBtn}
-                onPress={() => quickSelect("today")}
-              >
+              <TouchableOpacity style={styles.quickBtn} onPress={() => quickSelect("today")}>
                 <Text style={styles.quickBtnText}>Today</Text>
               </TouchableOpacity>
 
-              <TouchableOpacity
-                style={styles.quickBtn}
-                onPress={() => quickSelect("week")}
-              >
+              <TouchableOpacity style={styles.quickBtn} onPress={() => quickSelect("week")}>
                 <Text style={styles.quickBtnText}>This Week</Text>
               </TouchableOpacity>
 
-              <TouchableOpacity
-                style={styles.quickBtn}
-                onPress={() => quickSelect("month")}
-              >
+              <TouchableOpacity style={styles.quickBtn} onPress={() => quickSelect("month")}>
                 <Text style={styles.quickBtnText}>This Month</Text>
               </TouchableOpacity>
             </View>
           </View>
 
-          {/* STATUS */}
+          {/* STATUS FILTER */}
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Status</Text>
 
@@ -229,9 +226,7 @@ export default function LoanFilterSheet({
                     ]}
                     onPress={() => toggleStatus(opt.key)}
                   >
-                    <View
-                      style={[styles.statusDot, { backgroundColor: opt.color }]}
-                    />
+                    <View style={[styles.statusDot, { backgroundColor: opt.color }]} />
                     <Text style={styles.chipText}>{opt.label}</Text>
                   </TouchableOpacity>
                 );
@@ -246,12 +241,7 @@ export default function LoanFilterSheet({
             <TouchableOpacity
               style={styles.selectBox}
               onPress={() => {
-                const order: SortKey[] = [
-                  "newest",
-                  "oldest",
-                  "amount_desc",
-                  "amount_asc",
-                ];
+                const order: SortKey[] = ["newest", "oldest", "amount_desc", "amount_asc"];
                 const idx = order.indexOf(sort);
                 setSort(order[(idx + 1) % order.length]);
               }}
@@ -278,8 +268,7 @@ export default function LoanFilterSheet({
 
           <TouchableOpacity style={styles.applyBtnBottom} onPress={applyFilters}>
             <Text style={styles.applyBtnText}>
-              Apply Filters
-              {selectedCount > 0 ? ` (${selectedCount})` : ""}
+              Apply Filters {selectedCount > 0 ? `(${selectedCount})` : ""}
             </Text>
           </TouchableOpacity>
         </View>
@@ -292,10 +281,7 @@ export default function LoanFilterSheet({
             display={Platform.OS === "ios" ? "inline" : "calendar"}
             onChange={(e, d) => {
               setShowFromPicker(false);
-              if (d)
-                setFromDate(
-                  new Date(d.getFullYear(), d.getMonth(), d.getDate())
-                );
+              if (d) setFromDate(new Date(d.getFullYear(), d.getMonth(), d.getDate()));
             }}
           />
         )}
@@ -307,10 +293,7 @@ export default function LoanFilterSheet({
             display={Platform.OS === "ios" ? "inline" : "calendar"}
             onChange={(e, d) => {
               setShowToPicker(false);
-              if (d)
-                setToDate(
-                  new Date(d.getFullYear(), d.getMonth(), d.getDate())
-                );
+              if (d) setToDate(new Date(d.getFullYear(), d.getMonth(), d.getDate()));
             }}
           />
         )}
@@ -349,12 +332,9 @@ const styles = StyleSheet.create({
     paddingBottom: 6,
   },
   headerTitle: { fontSize: 18, fontWeight: "800", color: "#111" },
-
   content: { paddingHorizontal: 18, paddingTop: 8, flex: 1 },
-
   section: { marginBottom: 18 },
   sectionTitle: { fontSize: 15, fontWeight: "700", color: "#111" },
-
   row: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -373,7 +353,6 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   dateText: { marginLeft: 6, color: "#333", fontWeight: "600" },
-
   quickRow: {
     flexDirection: "row",
     marginTop: 12,
@@ -388,7 +367,6 @@ const styles = StyleSheet.create({
     marginRight: 8,
   },
   quickBtnText: { color: "#444", fontWeight: "700" },
-
   chipsRow: {
     flexDirection: "row",
     flexWrap: "wrap",
@@ -406,7 +384,6 @@ const styles = StyleSheet.create({
   },
   chipText: { marginLeft: 8, fontWeight: "600" },
   statusDot: { width: 10, height: 10, borderRadius: 5 },
-
   selectBox: {
     backgroundColor: "#f8f9fb",
     paddingVertical: 12,
@@ -419,7 +396,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   selectText: { fontWeight: "600", color: "#333" },
-
   bottomRow: {
     paddingHorizontal: 18,
     paddingVertical: 16,
@@ -428,7 +404,6 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: "#f3f4f6",
   },
-
   resetBtnBottom: {
     flex: 1,
     marginRight: 12,
@@ -439,11 +414,7 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     alignItems: "center",
   },
-  resetBtnText: {
-    color: "#169AF9",
-    fontWeight: "800",
-  },
-
+  resetBtnText: { color: "#169AF9", fontWeight: "800" },
   applyBtnBottom: {
     backgroundColor: "#169AF9",
     borderRadius: 10,

@@ -20,6 +20,8 @@ import axios from "axios";
 import { API_BASE } from "../config";
 import { useIsFocused } from "@react-navigation/native";
 
+const LOG_PREFIX = "[MY_LOANS]";
+
 const FILTERS = ["All", "Pending", "Active", "Paid"] as const;
 type Filter = (typeof FILTERS)[number];
 
@@ -49,17 +51,18 @@ export default function MyLoanScreen({ navigation }: any) {
         return;
       }
 
-      console.log("📡 Fetching borrower loans...");
+      console.log(LOG_PREFIX, "📡 Fetching borrower loans...");
       const res = await axios.get(`${API_BASE}/loans/my-loans`, {
         headers: { Authorization: `Bearer ${token}` },
       });
 
+      // backend returns array in most implementations we've seen
       const payload = Array.isArray(res.data) ? res.data : res.data?.loans ?? [];
-      console.log("📥 Borrower Loans:", payload);
+      console.log(LOG_PREFIX, "📥 Borrower Loans count:", payload.length);
 
       setLoans(payload);
     } catch (err) {
-      console.error("❌ Loan fetch error:", err?.response?.data || err.message);
+      console.error(LOG_PREFIX, "❌ Loan fetch error:", err?.response?.data || err.message);
       Alert.alert("Error", "Unable to fetch loans. Please try again.");
       setLoans([]);
     } finally {
@@ -72,22 +75,65 @@ export default function MyLoanScreen({ navigation }: any) {
     setExpandedMap((prev) => ({ ...prev, [id]: !prev[id] }));
   };
 
+  // -----------------------------
+  // UPDATED FILTERING FOR NEW STATUSES
+  // -----------------------------
   const filteredLoans = loans.filter((l) => {
     const st = (l.status || "").toLowerCase();
+
+    // helper boolean checks
+    const isApprovedPending = st === "approved_pending_disburse"; // admin approved — borrower must accept/reject
+    const isApprovedAndWaitingDisbursement = st === "approved" && !l.disbursed_at; // borrower already accepted (or legacy), waiting for disburse
+    const isActive = st === "active";
+    const isPaid = st === "paid" || st === "completed";
+
     if (filter === "All") return true;
-    if (filter === "Pending") return st === "pending";
-    if (filter === "Active") return st === "active" || st === "approved";
-    if (filter === "Paid") return st === "paid" || st === "completed";
+
+    if (filter === "Pending") {
+      // Pending includes:
+      // - original pending applications
+      // - admin-approved but awaiting borrower decision (approved_pending_disburse)
+      // - loans approved but not disbursed yet (approved && !disbursed_at)
+      return (
+        st === "pending" ||
+        isApprovedPending ||
+        isApprovedAndWaitingDisbursement
+      );
+    }
+
+    if (filter === "Active") {
+      // active loans / disbursed loans
+      return isActive || (st === "approved" && l.disbursed_at);
+    }
+
+    if (filter === "Paid") {
+      return isPaid;
+    }
+
     return true;
   });
 
+  // -----------------------------
+  // STATUS ICON LOGIC UPDATED
+  // -----------------------------
   const getStatusIcon = (status?: string) => {
     const s = (status || "").toLowerCase();
-    if (s === "active" || s === "approved")
+
+    if (s === "approved_pending_disburse")
+      return <Icon name="alert-circle" size={22} color="#d67f00" />; // needs borrower action
+
+    if (s === "approved")
       return <Icon name="checkmark-circle" size={22} color="#00B050" />;
-    if (s === "pending") return <Icon name="time" size={22} color="#169AF9" />;
+
+    if (s === "active")
+      return <Icon name="checkmark-circle" size={22} color="#00B050" />;
+
+    if (s === "pending")
+      return <Icon name="time" size={22} color="#169AF9" />;
+
     if (s === "paid" || s === "completed")
       return <Icon name="checkmark-done-circle" size={22} color="#0077C8" />;
+
     return <MCIcon name="file-document" size={22} color="#169AF9" />;
   };
 
@@ -99,19 +145,65 @@ export default function MyLoanScreen({ navigation }: any) {
     return Math.min(1, Math.max(0, paid / total));
   };
 
+  // -----------------------------
+  // Helpers: get display principal (use approved_principal when present)
+  // -----------------------------
+  function getDisplayPrincipal(loan: any) {
+    // We attempt multiple likely field names for approved principal (covers backend variations)
+    const approvedCandidates = [
+      loan.approved_principal,
+      loan.approved_amount,
+      loan.approved_principal_amount,
+      loan.approved,
+      loan.approved_principal_value,
+    ];
+
+    for (const v of approvedCandidates) {
+      if (v !== null && v !== undefined) {
+        const n = Number(v);
+        if (!Number.isNaN(n) && n > 0) {
+          return n;
+        }
+      }
+    }
+
+    // fallback to standard principal / amount fields
+    const fallback = Number(loan.principal ?? loan.amount ?? loan.amount_requested ?? 0);
+    return Number.isNaN(fallback) ? 0 : fallback;
+  }
+
+  // -----------------------------
+  // RENDER A LOAN CARD
+  // -----------------------------
   const renderLoan = ({ item }: { item: any }) => {
     const id = String(item.id);
     const isExpanded = !!expandedMap[id];
     const status = (item.status || "").toLowerCase();
 
-    const principal = Number(item.principal ?? 0);
+    const isApprovedPending = status === "approved_pending_disburse";
+    const isApprovedAndWaitingDisbursement = status === "approved" && !item.disbursed_at;
+    const isPending = status === "pending" || isApprovedPending || isApprovedAndWaitingDisbursement;
+
+    // NEW: always prefer approved principal if available (per your spec)
+    const principal = getDisplayPrincipal(item);
+
     const total = Number(item.total_payable ?? 0);
     const daily = Number(item.daily_payment ?? 0);
     const remaining = Number(item.remaining_balance ?? 0);
+
     const progress = computeProgress(item);
     const progressPct = Math.round(progress * 100);
 
-    const isPending = status === "pending";
+    // -----------------------------
+    // STATUS LABEL FIXES
+    // -----------------------------
+    let statusLabel = (status || "").toUpperCase();
+
+    if (isApprovedPending) statusLabel = "AWAITING YOUR APPROVAL";
+    else if (isApprovedAndWaitingDisbursement) statusLabel = "PENDING DISBURSEMENT";
+    else if (status === "pending") statusLabel = "APPLICATION PENDING";
+    else if (status === "active") statusLabel = "ACTIVE";
+    else if (status === "paid" || status === "completed") statusLabel = "PAID / COMPLETED";
 
     return (
       <View style={styles.loanCard}>
@@ -136,9 +228,10 @@ export default function MyLoanScreen({ navigation }: any) {
               style={[
                 styles.statusText,
                 isPending && { color: "#169AF9" },
+                isApprovedPending && { color: "#d67f00" },
               ]}
             >
-              {status.toUpperCase()}
+              {statusLabel}
             </Text>
             <Icon
               name={isExpanded ? "chevron-up" : "chevron-down"}
@@ -151,9 +244,8 @@ export default function MyLoanScreen({ navigation }: any) {
         {/* EXPANDED AREA */}
         {isExpanded && (
           <View style={styles.cardBody}>
-
-            {/* PENDING UI */}
-            {isPending && (
+            {/* DEFAULT PENDING APPLICATION */}
+            {status === "pending" && (
               <View style={{ paddingVertical: 20, alignItems: "center" }}>
                 <Text style={{ color: "#666", fontSize: 14, textAlign: "center" }}>
                   Your loan application is still under review.
@@ -161,8 +253,26 @@ export default function MyLoanScreen({ navigation }: any) {
               </View>
             )}
 
-            {/* ACTIVE / APPROVED LOAN DETAILS */}
-            {(status === "active" || status === "approved") && (
+            {/* APPROVED PENDING BORROWER ACCEPTANCE */}
+            {isApprovedPending && (
+              <View style={{ paddingVertical: 20, alignItems: "center" }}>
+                <Text style={{ color: "#d67f00", fontSize: 14, textAlign: "center" }}>
+                  Your loan has been approved by admin. Please review and accept or reject in Details.
+                </Text>
+              </View>
+            )}
+
+            {/* APPROVED BUT NOT YET DISBURSED (borrower already accepted) */}
+            {isApprovedAndWaitingDisbursement && (
+              <View style={{ paddingVertical: 20, alignItems: "center" }}>
+                <Text style={{ color: "#666", fontSize: 14, textAlign: "center" }}>
+                  You've accepted the approved amount — waiting for admin to disburse.
+                </Text>
+              </View>
+            )}
+
+            {/* ACTIVE / DISBURSED LOAN DETAILS */}
+            {(status === "active" || (status === "approved" && item.disbursed_at)) && (
               <>
                 <View style={styles.row}>
                   <Text style={styles.smallLabel}>Progress</Text>
@@ -209,7 +319,6 @@ export default function MyLoanScreen({ navigation }: any) {
                 <Text style={styles.detailsBtnText}>View Details</Text>
               </TouchableOpacity>
             </View>
-
           </View>
         )}
       </View>

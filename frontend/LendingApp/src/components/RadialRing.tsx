@@ -3,11 +3,12 @@ import React, { useEffect, useRef } from "react";
 import { View, Text, StyleSheet, Animated } from "react-native";
 import Svg, { Circle, Defs, LinearGradient, Stop } from "react-native-svg";
 
+const LOG_PREFIX = "[RADIAL_RING]";
+
 type Props = {
-  progress: number; // 0 - 100
+  progress: number; // 0–100
   label: string;
-  amount: number;
-  size?: number; // px
+  size?: number; 
   strokeWidth?: number;
   colors?: { start: string; end: string };
 };
@@ -15,15 +16,16 @@ type Props = {
 export default function RadialRing({
   progress,
   label,
-  amount,
   size = 92,
   strokeWidth = 10,
   colors = { start: "#4facfe", end: "#00c6fb" },
 }: Props) {
+  console.log(LOG_PREFIX, `Rendering ${label} with progress=${progress}%`);
+
   const radius = (size - strokeWidth) / 2;
   const circumference = 2 * Math.PI * radius;
 
-  // Animated value 0..100 used to animate strokeDashoffset
+  // Animated progress
   const anim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
@@ -32,14 +34,13 @@ export default function RadialRing({
       duration: 700,
       useNativeDriver: true,
     }).start();
-  }, [progress, anim]);
+  }, [progress]);
 
   const strokeDashoffset = anim.interpolate({
     inputRange: [0, 100],
     outputRange: [circumference, 0],
   });
 
-  // rotation -90 to start from top
   const cx = size / 2;
   const cy = size / 2;
 
@@ -55,7 +56,7 @@ export default function RadialRing({
           </LinearGradient>
         </Defs>
 
-        {/* background circle */}
+        {/* Background Track */}
         <Circle
           cx={cx}
           cy={cy}
@@ -65,7 +66,7 @@ export default function RadialRing({
           fill="none"
         />
 
-        {/* animated progress */}
+        {/* Animated Progress Circle */}
         <AnimatedCircle
           cx={cx}
           cy={cy}
@@ -81,17 +82,16 @@ export default function RadialRing({
         />
       </Svg>
 
-      {/* Percentage centered */}
+      {/* Centered Percentage */}
       <View style={[styles.centerText, { top: size * 0.33 }]}>
         <Text style={styles.percentText}>{Math.round(progress)}%</Text>
       </View>
 
-      {/* Separator line below the percent */}
+      {/* Separator */}
       <View style={styles.sep} />
 
-      {/* Label and amount */}
+      {/* Label */}
       <Text style={styles.labelText}>{label}</Text>
-      <Text style={styles.amountText}>₱ {amount.toLocaleString()}</Text>
     </View>
   );
 }
@@ -123,11 +123,6 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: "700",
     color: "#374151",
-  },
-  amountText: {
-    marginTop: 4,
-    fontSize: 12,
-    color: "#6b7280",
-    fontWeight: "600",
+    textAlign: "center",
   },
 });

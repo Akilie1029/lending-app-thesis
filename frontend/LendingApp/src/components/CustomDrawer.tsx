@@ -13,16 +13,20 @@ import Icon from "react-native-vector-icons/MaterialCommunityIcons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import api from "../services/api";
 
+const LOG_PREFIX = "[DRAWER]";
+
 const CustomDrawer = (props: any) => {
   const [user, setUser] = useState<any>(null);
-  const [hasActiveLoan, setHasActiveLoan] = useState(false);
-  const [hasPendingLoan, setHasPendingLoan] = useState(false);
+
+  // NEW unified loan state
+  const [hasUnfinishedLoan, setHasUnfinishedLoan] = useState(false);
   const [hasAnyLoan, setHasAnyLoan] = useState(false);
 
   const loadDrawerData = useCallback(async () => {
     try {
       const token = await AsyncStorage.getItem("userToken");
       if (!token) {
+        console.warn(LOG_PREFIX, "No token found — redirecting to Login");
         props.navigation.replace("Login");
         return;
       }
@@ -30,24 +34,50 @@ const CustomDrawer = (props: any) => {
       // --- Fetch user ---
       const me = await api.get("/auth/me");
       setUser(me.data);
+      console.log(LOG_PREFIX, "Loaded user:", me.data?.email);
 
-      // --- Active Loan ---
-      const activeRes = await api.get("/loans/my-active");
-      const activeLoan = activeRes.data;
-      setHasActiveLoan(!!activeLoan?.id && activeLoan.status === "active");
+      // --- Fetch ALL loans (needed to correctly detect states) ---
+      const allLoansRes = await api.get("/loans/my-loans");
+      const allLoans = allLoansRes.data || [];
+      console.debug(LOG_PREFIX, "allLoans fetched:", allLoans);
 
-      // --- Latest Loan for pending detection ---
-      const latestRes = await api.get("/loans/my-latest");
-      const latestLoan = latestRes.data?.latestLoan;
-      setHasPendingLoan(latestLoan?.status === "pending");
+      setHasAnyLoan(allLoans.length > 0);
 
-      // --- All loans for "My Loan" menu ---
-      const allLoans = await api.get("/loans/my-loans");
-      setHasAnyLoan(allLoans.data.length > 0);
+      // --- Correct loan eligibility logic ---
+      // We treat "unfinished" as any loan that prevents creating a new application:
+      // - status = 'pending' (under review)
+      // - status = 'approved_pending_disburse' (approved, awaiting borrower acceptance)
+      // - status = 'approved' and not disbursed (admin approved but not disbursed / borrower may need to accept)
+      // - status = 'active' (already disbursed / running)
+      //
+      // Additionally: if admin already approved a reduced amount (approved_principal > 0) but status is 'approved_pending_disburse' or 'approved', that still counts as unfinished.
+      const unfinished = allLoans.some((loan: any) => {
+        const st = (loan.status || "").toLowerCase();
+
+        const approvedButPendingDisbursement =
+          st === "approved" && !loan.disbursed_at;
+
+        const approvedPendingBorrower =
+          st === "approved_pending_disburse" || st === "approved_pending_disbursement";
+
+        // If approved_principal present and > 0, treat as awaiting borrower/admin action if not disbursed
+        const adminApprovedAmountAssigned = Number(loan.approved_principal || 0) > 0;
+
+        return (
+          st === "pending" ||
+          approvedPendingBorrower ||
+          approvedButPendingDisbursement ||
+          st === "active" ||
+          (adminApprovedAmountAssigned && !loan.disbursed_at)
+        );
+      });
+
+      setHasUnfinishedLoan(unfinished);
+      console.log(LOG_PREFIX, `hasAnyLoan=${allLoans.length > 0} hasUnfinishedLoan=${unfinished}`);
     } catch (err) {
-      console.error("❌ Drawer load error:", err);
+      console.error(LOG_PREFIX, "❌ Drawer load error:", err?.response?.data || err.message);
     }
-  }, []);
+  }, [props.navigation]);
 
   useEffect(() => {
     loadDrawerData();
@@ -104,6 +134,7 @@ const CustomDrawer = (props: any) => {
         contentContainerStyle={styles.drawerScroll}
       >
         <View style={styles.drawerItems}>
+          {/* Dashboard */}
           <TouchableOpacity
             style={styles.menuItem}
             onPress={() => {
@@ -115,8 +146,8 @@ const CustomDrawer = (props: any) => {
             <Text style={styles.menuText}>Dashboard</Text>
           </TouchableOpacity>
 
-          {/* Loan Application (hidden if active or pending) */}
-          {!hasActiveLoan && !hasPendingLoan && (
+          {/* Loan Application — only visible if user has NO unfinished loan */}
+          {!hasUnfinishedLoan && (
             <TouchableOpacity
               style={styles.menuItem}
               onPress={() => {
@@ -160,7 +191,7 @@ const CustomDrawer = (props: any) => {
         </View>
       </DrawerContentScrollView>
 
-      {/* Bottom Actions */}
+      {/* Bottom actions */}
       <View style={styles.bottomSection}>
         <TouchableOpacity
           style={styles.bottomItem}
@@ -170,10 +201,7 @@ const CustomDrawer = (props: any) => {
           <Text style={styles.bottomText}>Help & Support</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity
-          style={styles.bottomItem}
-          onPress={handleLogout}
-        >
+        <TouchableOpacity style={styles.bottomItem} onPress={handleLogout}>
           <Icon name="logout" size={22} color="#FF3B30" />
           <Text style={[styles.bottomText, { color: "#FF3B30" }]}>
             Logout

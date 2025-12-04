@@ -1,4 +1,8 @@
-// src/screens/AdminDisbursementScreen.tsx
+// ---------------------------------------------------------
+// ADMIN — PENDING DISBURSEMENTS SCREEN
+// Shows loans with status = 'approved'
+// (borrower already accepted — admin must disburse)
+// ---------------------------------------------------------
 
 import React, { useEffect, useState } from "react";
 import {
@@ -17,151 +21,179 @@ import {
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import axios from "axios";
 import { format } from "date-fns";
+
 import SmallHeader from "../components/SmallHeader";
-import { normalizeLoan } from "../utils/normalizeLoan";
 import { BASE_URL } from "../config";
 
+const LOG_PREFIX = "[ADMIN_DISBURSE_SCREEN]";
+
+// Types for admin loans
 type LoanRow = {
   id: string;
   full_name?: string;
-  approved_amount?: number;
+  approved_principal?: number;
+  approved_total_payable?: number;
+  approved_daily_payment?: number;
   principal?: number;
   total_payable?: number;
-  remaining_balance?: number;
-  days?: number | null;
+  days?: number;
   status?: string;
   created_at?: string;
+  approved_at?: string;
   disbursed_at?: string | null;
 
   gov_id_uri?: string | null;
   selfie_id_uri?: string | null;
   proof_uri?: string | null;
-
-  [k: string]: any;
 };
 
 export default function AdminDisbursementScreen({ navigation }: any) {
   const [loading, setLoading] = useState(true);
   const [loans, setLoans] = useState<LoanRow[]>([]);
-  const [processingMap, setProcessingMap] = useState<Record<string, boolean>>(
-    {}
-  );
+  const [processingMap, setProcessingMap] = useState<Record<string, boolean>>({});
 
   const [previewVisible, setPreviewVisible] = useState(false);
   const [previewUri, setPreviewUri] = useState<string | null>(null);
 
-  useEffect(() => {
-    loadPending();
-  }, []);
-
+  // -------------------------------------------
+  // AUTH HEADERS
+  // -------------------------------------------
   const getAuthHeaders = async () => {
     const token = await AsyncStorage.getItem("userToken");
     return { Authorization: token ? `Bearer ${token}` : "" };
   };
 
-  /**
-   * Load loans that are APPROVED and ready for disbursement
-   */
+  // -------------------------------------------
+  // Load loans
+  // -------------------------------------------
+  useEffect(() => {
+    loadPending();
+  }, []);
+
   async function loadPending() {
     setLoading(true);
     try {
       const headers = await getAuthHeaders();
 
-      console.log("📡 Fetching approved loans for disbursement…");
+      console.log(LOG_PREFIX, "📡 Fetching approved loans for disbursement…");
 
-      const res = await axios.get(`${BASE_URL}/api/admin/approved-loans`, {
-        headers,
-      });
-
-      const list = Array.isArray(res.data) ? res.data : res.data?.loans ?? [];
-
-      const normalized = list.map((r: any) => normalizeLoan(r));
-
-      const pendingList = normalized.filter((l: any) =>
-        ["approved", "approved_pending_disburse", "ready_to_disburse"].includes(
-          (l.status || "").toLowerCase()
-        )
+      const res = await axios.get(
+        `${BASE_URL}/api/admin/disburse/pending`,
+        { headers }
       );
 
-      console.log("📥 Loans pending disbursement:", pendingList.length);
+      const list = Array.isArray(res.data?.loans)
+        ? res.data.loans
+        : [];
 
-      setLoans(pendingList);
+      console.log(LOG_PREFIX, "📥 Raw payload count:", list.length);
+
+      // No normalizeLoan — use backend fields EXACTLY
+      const pending = list.filter(
+        (l: any) => (l.status || "").toLowerCase() === "approved"
+      );
+
+      console.log(LOG_PREFIX, "📥 Pending disbursement:", pending.length);
+
+      setLoans(pending);
     } catch (err: any) {
       console.error(
-        "❌ Load pending disbursement error:",
-        err?.response?.data || err?.message
+        LOG_PREFIX,
+        "❌ Load error:",
+        err?.response?.data || err.message
       );
-      Alert.alert("Error", "Failed to load pending disbursements.");
+      Alert.alert("Error", "Unable to load pending disbursements.");
       setLoans([]);
     } finally {
       setLoading(false);
     }
   }
 
-  /**
-   * Confirm prompt before disbursing
-   */
+  // -------------------------------------------
+  // CONFIRM DISBURSE
+  // -------------------------------------------
   const confirmDisburse = (loan: LoanRow) => {
-    const amount = Number(loan.approved_amount ?? loan.principal ?? 0);
+    const amount =
+      Number(loan.approved_principal) ||
+      Number(loan.principal) ||
+      0;
 
     Alert.alert(
       "Disburse Loan",
       `Disburse ₱ ${amount.toLocaleString()} to ${loan.full_name}?`,
       [
         { text: "Cancel", style: "cancel" },
-        { text: "Disburse", onPress: () => disburseLoan(String(loan.id)) },
+        { text: "YES, DISBURSE", onPress: () => disburseLoan(loan.id) },
       ]
     );
   };
 
-  /**
-   * Finalize disbursement
-   */
+  // -------------------------------------------
+  // DISBURSEMENT ACTION
+  // -------------------------------------------
   const disburseLoan = async (loanId: string) => {
     setProcessingMap((p) => ({ ...p, [loanId]: true }));
+
     try {
       const headers = await getAuthHeaders();
 
-      console.log("➡️ Disbursing loan:", loanId);
+      console.log(LOG_PREFIX, "➡️ Disbursing loan:", loanId);
 
       await axios.post(
-        `${BASE_URL}/api/admin/loan/${loanId}/disburse`,
+        `${BASE_URL}/api/admin/disburse/${loanId}`,
         {},
         { headers }
       );
 
       Alert.alert("Success", "Loan disbursed successfully.");
+
       await loadPending();
     } catch (err: any) {
-      console.error("❌ Disburse error:", err?.response?.data || err?.message);
+      console.error(
+        LOG_PREFIX,
+        "❌ Disburse error:",
+        err?.response?.data || err.message
+      );
       Alert.alert(
         "Error",
         err?.response?.data?.error ||
           err?.response?.data?.message ||
-          "Failed to disburse loan."
+          "Disbursement failed."
       );
     } finally {
       setProcessingMap((p) => ({ ...p, [loanId]: false }));
     }
   };
 
+  // -------------------------------------------
+  // IMAGE PREVIEW
+  // -------------------------------------------
   const openPreview = (uri?: string | null) => {
     if (!uri) return;
     setPreviewUri(uri);
     setPreviewVisible(true);
   };
 
+  // -------------------------------------------
+  // RENDER LOAN CARD
+  // -------------------------------------------
   const renderLoan = ({ item }: { item: LoanRow }) => {
-    const approvedAmount = Number(item.approved_amount ?? item.principal ?? 0);
-    const total = Number(item.total_payable ?? 0);
-    const id = String(item.id);
+    const approvedAmount =
+      Number(item.approved_principal) ||
+      Number(item.principal) ||
+      0;
+
+    const total =
+      Number(item.approved_total_payable) ||
+      Number(item.total_payable) ||
+      0;
 
     return (
       <View style={styles.card}>
-        {/* HEADER ROW */}
+        {/* HEADER */}
         <View style={styles.row}>
           <View style={{ flex: 1 }}>
-            <Text style={styles.name}>{item.full_name || "Unknown borrower"}</Text>
+            <Text style={styles.name}>{item.full_name}</Text>
 
             <Text style={styles.meta}>
               Applied:{" "}
@@ -170,18 +202,22 @@ export default function AdminDisbursementScreen({ navigation }: any) {
                 : "—"}
             </Text>
 
-            <Text style={styles.meta}>Term: {item.days ?? "-"} days</Text>
+            <Text style={styles.meta}>
+              Term: {item.days ?? "-"} days
+            </Text>
           </View>
 
           <View style={{ alignItems: "flex-end" }}>
-            <Text style={styles.amount}>₱ {approvedAmount.toLocaleString()}</Text>
-            <Text style={{ color: "#666", marginTop: 6 }}>
+            <Text style={styles.amount}>
+              ₱ {approvedAmount.toLocaleString()}
+            </Text>
+            <Text style={{ color: "#666", marginTop: 4 }}>
               Total: ₱ {total.toLocaleString()}
             </Text>
           </View>
         </View>
 
-        {/* DOCUMENT THUMBNAILS */}
+        {/* DOCUMENTS */}
         <View style={styles.docRow}>
           <TouchableOpacity onPress={() => openPreview(item.gov_id_uri)}>
             <Image
@@ -220,12 +256,14 @@ export default function AdminDisbursementScreen({ navigation }: any) {
           </TouchableOpacity>
         </View>
 
-        {/* ACTION BUTTONS */}
+        {/* ACTIONS */}
         <View style={styles.actions}>
           <TouchableOpacity
             style={[styles.button, { backgroundColor: "#0071b2" }]}
             onPress={() =>
-              navigation.navigate("AdminLoanDetailsScreen", { loanId: id })
+              navigation.navigate("AdminLoanDetailsScreen", {
+                loanId: item.id,
+              })
             }
           >
             <Text style={styles.buttonText}>View Details</Text>
@@ -234,12 +272,12 @@ export default function AdminDisbursementScreen({ navigation }: any) {
           <TouchableOpacity
             style={[styles.button, { backgroundColor: "#00C853" }]}
             onPress={() => confirmDisburse(item)}
-            disabled={!!processingMap[id]}
+            disabled={!!processingMap[item.id]}
           >
-            {processingMap[id] ? (
+            {processingMap[item.id] ? (
               <ActivityIndicator color="#fff" />
             ) : (
-              <Text style={styles.buttonText}>Disburse Now</Text>
+              <Text style={styles.buttonText}>Disburse</Text>
             )}
           </TouchableOpacity>
         </View>
@@ -247,6 +285,9 @@ export default function AdminDisbursementScreen({ navigation }: any) {
     );
   };
 
+  // -------------------------------------------
+  // SCREEN
+  // -------------------------------------------
   return (
     <View style={{ flex: 1 }}>
       <SmallHeader title="Pending Disbursements" />
@@ -257,60 +298,46 @@ export default function AdminDisbursementScreen({ navigation }: any) {
         </View>
       ) : loans.length === 0 ? (
         <View style={styles.center}>
-          <Text style={{ color: "#666" }}>
-            No loans waiting for disbursement.
-          </Text>
+          <Text style={{ color: "#666" }}>No loans waiting for disbursement.</Text>
         </View>
       ) : (
         <FlatList
-          contentContainerStyle={{ padding: 12, paddingBottom: 80 }}
           data={loans}
-          keyExtractor={(i) => String(i.id)}
           renderItem={renderLoan}
+          keyExtractor={(i) => String(i.id)}
+          contentContainerStyle={{ padding: 12, paddingBottom: 80 }}
         />
       )}
 
-      {/* IMAGE PREVIEW MODAL */}
+      {/* PREVIEW MODAL */}
       <Modal visible={previewVisible} animationType="slide">
         <SafeAreaView style={{ flex: 1, backgroundColor: "#000" }}>
-          <View style={{ flex: 1 }}>
-            <ScrollView
-              contentContainerStyle={{ alignItems: "center", padding: 16 }}
-            >
-              {previewUri ? (
-                <Image
-                  source={{ uri: previewUri }}
-                  style={{
-                    width: "100%",
-                    height: 520,
-                    resizeMode: "contain",
-                  }}
-                />
-              ) : (
-                <Text style={{ color: "#fff" }}>No preview available</Text>
-              )}
-            </ScrollView>
+          <ScrollView contentContainerStyle={{ flexGrow: 1 }}>
+            {previewUri ? (
+              <Image
+                source={{ uri: previewUri }}
+                style={{ width: "100%", height: 600, resizeMode: "contain" }}
+              />
+            ) : (
+              <Text style={{ color: "#fff" }}>No preview</Text>
+            )}
+          </ScrollView>
 
-            <View style={{ padding: 12 }}>
-              <TouchableOpacity
-                onPress={() => setPreviewVisible(false)}
-                style={{
-                  backgroundColor: "#fff",
-                  padding: 12,
-                  borderRadius: 8,
-                  alignItems: "center",
-                }}
-              >
-                <Text style={{ fontWeight: "700" }}>Close</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
+          <TouchableOpacity
+            style={styles.closeBtn}
+            onPress={() => setPreviewVisible(false)}
+          >
+            <Text style={{ fontWeight: "700" }}>Close</Text>
+          </TouchableOpacity>
         </SafeAreaView>
       </Modal>
     </View>
   );
 }
 
+// -------------------------------------------
+// STYLES
+// -------------------------------------------
 const styles = StyleSheet.create({
   center: { flex: 1, justifyContent: "center", alignItems: "center" },
 
@@ -325,7 +352,6 @@ const styles = StyleSheet.create({
   row: {
     flexDirection: "row",
     justifyContent: "space-between",
-    alignItems: "flex-start",
   },
 
   name: { fontSize: 16, fontWeight: "800" },
@@ -335,8 +361,8 @@ const styles = StyleSheet.create({
 
   docRow: {
     flexDirection: "row",
-    marginTop: 12,
     justifyContent: "space-between",
+    marginTop: 12,
   },
 
   thumb: {
@@ -353,7 +379,10 @@ const styles = StyleSheet.create({
     color: "#555",
   },
 
-  actions: { flexDirection: "row", marginTop: 12 },
+  actions: {
+    flexDirection: "row",
+    marginTop: 12,
+  },
 
   button: {
     flex: 1,
@@ -364,4 +393,12 @@ const styles = StyleSheet.create({
   },
 
   buttonText: { color: "#fff", fontWeight: "700" },
+
+  closeBtn: {
+    backgroundColor: "#fff",
+    padding: 12,
+    borderRadius: 10,
+    alignItems: "center",
+    margin: 12,
+  },
 });

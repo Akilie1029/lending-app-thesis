@@ -1,19 +1,26 @@
 // src/screens/LoanDetailsScreen.tsx
 
-import React from "react";
+import React, { useState } from "react";
 import {
   View,
   Text,
   StyleSheet,
   ScrollView,
   TouchableOpacity,
+  Alert,
+  ActivityIndicator,
 } from "react-native";
 import Icon from "react-native-vector-icons/Ionicons";
+import api from "../services/api";
+
+const LOG_PREFIX = "[LOAN_DETAILS]";
 
 export default function LoanDetailsScreen({ navigation, route }: any) {
   const loan = route.params?.loan;
 
-  console.log("📄 LoanDetailsScreen → loan payload:", loan);
+  const [processing, setProcessing] = useState(false);
+
+  console.log(LOG_PREFIX, "📄 LoanDetailsScreen → loan payload:", loan);
 
   if (!loan) {
     return (
@@ -23,11 +30,16 @@ export default function LoanDetailsScreen({ navigation, route }: any) {
     );
   }
 
+  // ------------------------------
+  // VALUES
+  // ------------------------------
   const principal = Number(loan.principal ?? 0);
+  const approvedPrincipal = Number(loan.approved_principal ?? principal);
+
   const days = Number(loan.days ?? 0);
-  const daily = Number(loan.daily_payment ?? 0);
-  const total = Number(loan.total_payable ?? 0);
-  const remaining = Number(loan.remaining_balance ?? total);
+
+  const daily = Number(loan.approved_daily_payment ?? loan.daily_payment ?? 0);
+  const total = Number(loan.approved_total_payable ?? loan.total_payable ?? 0);
 
   const INTEREST_RATE = loan.interest_rate
     ? Number(loan.interest_rate)
@@ -44,13 +56,15 @@ export default function LoanDetailsScreen({ navigation, route }: any) {
     : "-";
 
   const statusRaw = (loan.status || "").toLowerCase();
-  let statusLabel = (loan.status || "UNKNOWN").toUpperCase();
 
   const isPending = statusRaw === "pending";
+  const isApprovedPending = statusRaw === "approved_pending_disburse";
   const isApproved = statusRaw === "approved";
   const isActive = statusRaw === "active";
   const isCompleted = statusRaw === "paid" || statusRaw === "completed";
 
+  let statusLabel = (loan.status || "UNKNOWN").toUpperCase();
+  if (isApprovedPending) statusLabel = "AWAITING YOUR APPROVAL";
   if (isApproved) statusLabel = "APPROVED (Pending Disbursement)";
   if (isPending) statusLabel = "PENDING";
   if (isActive) statusLabel = "ACTIVE";
@@ -63,6 +77,108 @@ export default function LoanDetailsScreen({ navigation, route }: any) {
   const money = (v: number) =>
     `₱ ${v.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
 
+  // -------------------------------------------------------------
+  // BORROWER ACCEPT LOAN
+  // -------------------------------------------------------------
+  const handleAcceptLoan = () => {
+    Alert.alert(
+      "Confirm Loan Acceptance",
+      `You are accepting the following loan:
+
+• Principal: ${money(approvedPrincipal)}
+• Total Payable: ${money(total)}
+• Daily Payment: ${money(daily)}
+
+Proceed?`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Accept Loan",
+          onPress: async () => {
+            try {
+              setProcessing(true);
+              console.log(LOG_PREFIX, "➡️ Sending ACCEPT request:", loan.id);
+
+              const res = await api.post(`/loans/${loan.id}/accept`);
+
+              console.log(LOG_PREFIX, "ACCEPT Response:", res.data);
+
+              Alert.alert("Success", "You have accepted the loan.", [
+                {
+                  text: "OK",
+                  onPress: () => navigation.navigate("My Loan"),
+                },
+              ]);
+            } catch (err: any) {
+              console.log(
+                LOG_PREFIX,
+                "❌ Accept loan error:",
+                err?.response?.data || err?.message
+              );
+              Alert.alert(
+                "Error",
+                err?.response?.data?.message ||
+                  "Unable to accept loan at this time."
+              );
+            } finally {
+              setProcessing(false);
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  // -------------------------------------------------------------
+  // BORROWER REJECT LOAN
+  // -------------------------------------------------------------
+  const handleRejectLoan = () => {
+    Alert.alert(
+      "Reject Loan?",
+      "Are you sure you want to reject this approved loan offer?",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Reject",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              setProcessing(true);
+              console.log(LOG_PREFIX, "➡️ Sending REJECT request:", loan.id);
+
+              const res = await api.post(`/loans/${loan.id}/reject`);
+
+              console.log(LOG_PREFIX, "REJECT Response:", res.data);
+
+              Alert.alert("Loan Rejected", "You have declined the loan offer.", [
+                {
+                  text: "OK",
+                  onPress: () => navigation.navigate("My Loan"),
+                },
+              ]);
+            } catch (err: any) {
+              console.log(
+                LOG_PREFIX,
+                "❌ Reject loan error:",
+                err?.response?.data || err?.message
+              );
+              Alert.alert(
+                "Error",
+                err?.response?.data?.message ||
+                  "Unable to reject loan at this time."
+              );
+            } finally {
+              setProcessing(false);
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  // -------------------------------------------------------------
+  // UI
+  // -------------------------------------------------------------
   return (
     <View style={{ flex: 1, backgroundColor: "#f6f7fb" }}>
       {/* HEADER */}
@@ -76,14 +192,17 @@ export default function LoanDetailsScreen({ navigation, route }: any) {
         <View style={{ width: 44 }} />
       </View>
 
-      <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 60 }}>
+      {/* BODY */}
+      <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 140 }}>
         {/* SUMMARY CARD */}
         <View style={styles.card}>
           <Text style={styles.title}>Loan Summary</Text>
 
           <View style={styles.row}>
-            <Text style={styles.label}>Loan Amount</Text>
-            <Text style={styles.value}>{money(principal)}</Text>
+            <Text style={styles.label}>
+              {isApprovedPending || isApproved ? "Approved Amount" : "Loan Amount"}
+            </Text>
+            <Text style={styles.value}>{money(approvedPrincipal)}</Text>
           </View>
 
           <View style={styles.row}>
@@ -108,7 +227,6 @@ export default function LoanDetailsScreen({ navigation, route }: any) {
             <Text style={styles.value}>{money(daily)}</Text>
           </View>
 
-          {/* ⭐ ALWAYS SHOW TOTAL PAYABLE */}
           <View style={styles.row}>
             <Text style={styles.label}>Total Payable</Text>
             <Text style={[styles.value, { color: "#0077C8" }]}>
@@ -145,7 +263,7 @@ export default function LoanDetailsScreen({ navigation, route }: any) {
           </View>
         </View>
 
-        {/* ACTIVE LOANS — EXTRA BREAKDOWN */}
+        {/* ACTIVE LOAN BREAKDOWN */}
         {isActive && (
           <View style={styles.card}>
             <Text style={styles.title}>Repayment Breakdown</Text>
@@ -160,13 +278,13 @@ export default function LoanDetailsScreen({ navigation, route }: any) {
             <View style={styles.row}>
               <Text style={styles.label}>Remaining Balance</Text>
               <Text style={[styles.value, { color: "#D62828" }]}>
-                {money(remaining)}
+                {money(loan.remaining_balance ?? total)}
               </Text>
             </View>
           </View>
         )}
 
-        {/* IMPORTANT REMINDER */}
+        {/* IMPORTANT SECTION */}
         <View style={styles.card}>
           <Text style={styles.title}>Important</Text>
           <Text style={styles.reminder}>
@@ -183,7 +301,7 @@ export default function LoanDetailsScreen({ navigation, route }: any) {
           </TouchableOpacity>
         </View>
 
-        {/* PAYMENT BUTTON (ACTIVE LOANS ONLY) */}
+        {/* PAYMENT BUTTON */}
         {showPayButton && (
           <TouchableOpacity
             style={styles.payBtn}
@@ -195,10 +313,44 @@ export default function LoanDetailsScreen({ navigation, route }: any) {
 
         <View style={{ height: 40 }} />
       </ScrollView>
+
+      {/* -------------------------- */}
+      {/* ACCEPT / REJECT BUTTONS    */}
+      {/* -------------------------- */}
+      {isApprovedPending && (
+        <View style={styles.bottomActionContainer}>
+          <TouchableOpacity
+            style={[styles.bottomBtn, { backgroundColor: "#28a745" }]}
+            disabled={processing}
+            onPress={handleAcceptLoan}
+          >
+            {processing ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <Text style={styles.bottomBtnText}>Accept Loan</Text>
+            )}
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.bottomBtn, { backgroundColor: "#dc3545" }]}
+            disabled={processing}
+            onPress={handleRejectLoan}
+          >
+            {processing ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <Text style={styles.bottomBtnText}>Reject Loan</Text>
+            )}
+          </TouchableOpacity>
+        </View>
+      )}
     </View>
   );
 }
 
+// -------------------------------------------------------------
+// STYLES
+// -------------------------------------------------------------
 const styles = StyleSheet.create({
   header: {
     paddingTop: 50,
@@ -248,4 +400,23 @@ const styles = StyleSheet.create({
   statusActive: { color: "#19d06b" },
 
   center: { flex: 1, justifyContent: "center", alignItems: "center" },
+
+  bottomActionContainer: {
+    position: "absolute",
+    bottom: 0,
+    width: "100%",
+    flexDirection: "row",
+    padding: 12,
+    backgroundColor: "#fff",
+    borderTopWidth: 1,
+    borderColor: "#ddd",
+  },
+  bottomBtn: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 10,
+    alignItems: "center",
+    marginHorizontal: 6,
+  },
+  bottomBtnText: { color: "#fff", fontWeight: "800", fontSize: 16 },
 });

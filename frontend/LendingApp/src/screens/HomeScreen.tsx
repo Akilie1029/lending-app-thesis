@@ -20,12 +20,14 @@ import { API_BASE } from "../config";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 
-// LOCAL BANNERS (use your 3 uploaded images)
+// BANNERS
 const BANNERS = [
   require("../../assets/banners/banner1.jpg"),
   require("../../assets/banners/banner2.jpg"),
   require("../../assets/banners/banner3.jpg"),
 ];
+
+const LOG_PREFIX = "[HOME]";
 
 const HomeScreen = ({ navigation }: HomeScreenProps) => {
   const [user, setUser] = useState<any>(null);
@@ -34,11 +36,10 @@ const HomeScreen = ({ navigation }: HomeScreenProps) => {
   const [latestLoan, setLatestLoan] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
-  // Banner state
+  // Banner auto-slide
   const [bannerIndex, setBannerIndex] = useState(0);
   const bannerRef = useRef<FlatList>(null);
 
-  // 🔄 Auto-slide banners every 4 seconds
   useEffect(() => {
     const interval = setInterval(() => {
       const nextIndex = (bannerIndex + 1) % BANNERS.length;
@@ -49,14 +50,13 @@ const HomeScreen = ({ navigation }: HomeScreenProps) => {
     return () => clearInterval(interval);
   }, [bannerIndex]);
 
+  // ============== FETCH DATA ==============
   const fetchData = async () => {
     try {
       const token = await AsyncStorage.getItem("userToken");
       if (!token) return;
 
       const headers = { Authorization: `Bearer ${token}` };
-
-      console.log("📤 HOME FETCH — Calling 4 endpoints...");
 
       const [userRes, txRes, activeLoanRes, latestLoanRes] = await Promise.all([
         axios.get(`${API_BASE}/auth/me`, { headers }),
@@ -82,7 +82,7 @@ const HomeScreen = ({ navigation }: HomeScreenProps) => {
 
       setLatestLoan(latest?.id ? latest : null);
     } catch (e) {
-      console.log("❌ Dashboard fetch error:", e);
+      console.log(LOG_PREFIX, "❌ Fetch error:", e);
     } finally {
       setLoading(false);
     }
@@ -98,6 +98,19 @@ const HomeScreen = ({ navigation }: HomeScreenProps) => {
     }, [])
   );
 
+  // ============== GLOBAL AMOUNT LOGIC ==============
+  const getLoanAmount = (loan: any) => {
+    if (!loan) return 0;
+
+    const approved = Number(loan.approved_principal || 0);
+    const principal = Number(loan.principal || 0);
+
+    // If admin approved a specific amount → always use approved_principal
+    if (approved > 0) return approved;
+
+    return principal;
+  };
+
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
@@ -107,7 +120,10 @@ const HomeScreen = ({ navigation }: HomeScreenProps) => {
   }
 
   const hasActiveLoan = !!activeLoan;
-  const hasPendingLoan = latestLoan && latestLoan.status === "pending";
+
+  const hasPendingLoan =
+    latestLoan &&
+    (latestLoan.status === "pending" || latestLoan.status === "approved");
 
   return (
     <ScrollView
@@ -130,13 +146,13 @@ const HomeScreen = ({ navigation }: HomeScreenProps) => {
         </View>
       </LinearGradient>
 
-
       {/* ================= BALANCE CARD ================= */}
       <View style={styles.balanceCard}>
         {hasActiveLoan ? (
           <>
             <Text style={styles.dailyPaymentText}>
-              Daily Payment: ₱ {Number(activeLoan.daily_payment ?? 0).toLocaleString()}
+              Daily Payment: ₱{" "}
+              {Number(activeLoan.daily_payment ?? 0).toLocaleString()}
             </Text>
 
             <Text style={styles.dueDateText}>
@@ -178,16 +194,20 @@ const HomeScreen = ({ navigation }: HomeScreenProps) => {
         )}
       </View>
 
-
-      {/* ================= PENDING LOAN CARD ================= */}
+      {/* ================= PENDING LOAN ================= */}
       {hasPendingLoan && !hasActiveLoan && (
         <View style={styles.loanCard}>
           <View style={styles.loanRow}>
             <View>
               <Text style={styles.loanAmount}>
-                ₱ {Number(latestLoan.principal).toLocaleString()}
+                ₱ {getLoanAmount(latestLoan).toLocaleString()}
               </Text>
-              <Text style={styles.loanAmountLabel}>Pending Approval</Text>
+
+              <Text style={styles.loanAmountLabel}>
+                {latestLoan.status === "approved"
+                  ? "Pending Disbursement"
+                  : "Pending Approval"}
+              </Text>
             </View>
 
             <View style={{ alignItems: "flex-end" }}>
@@ -209,13 +229,13 @@ const HomeScreen = ({ navigation }: HomeScreenProps) => {
         </View>
       )}
 
-      {/* ================= ACTIVE LOAN CARD ================= */}
+      {/* ================= ACTIVE LOAN ================= */}
       {hasActiveLoan && (
         <View style={styles.loanCard}>
           <View style={styles.loanRow}>
             <View>
               <Text style={styles.loanAmount}>
-                ₱ {Number(activeLoan.principal).toLocaleString()}
+                ₱ {getLoanAmount(activeLoan).toLocaleString()}
               </Text>
               <Text style={styles.loanAmountLabel}>Approved Loan Amount</Text>
             </View>
@@ -240,8 +260,6 @@ const HomeScreen = ({ navigation }: HomeScreenProps) => {
           </TouchableOpacity>
         </View>
       )}
-
-
 
       {/* ================= RECENT TRANSACTIONS ================= */}
       <View style={styles.sectionHeader}>
@@ -273,7 +291,7 @@ const HomeScreen = ({ navigation }: HomeScreenProps) => {
         )}
       </View>
 
-            {/* ================= BANNER SECTION ================= */}
+      {/* ================= BANNER FOOTER ================= */}
       <View style={styles.bannerContainer}>
         <FlatList
           ref={bannerRef}
@@ -283,7 +301,9 @@ const HomeScreen = ({ navigation }: HomeScreenProps) => {
           pagingEnabled
           showsHorizontalScrollIndicator={false}
           onMomentumScrollEnd={(ev) => {
-            const index = Math.round(ev.nativeEvent.contentOffset.x / SCREEN_WIDTH);
+            const index = Math.round(
+              ev.nativeEvent.contentOffset.x / SCREEN_WIDTH
+            );
             setBannerIndex(index);
           }}
           renderItem={({ item }) => (
@@ -292,7 +312,7 @@ const HomeScreen = ({ navigation }: HomeScreenProps) => {
           style={{ width: SCREEN_WIDTH }}
         />
 
-        {/* Dots Indicator */}
+        {/* dots */}
         <View style={styles.dotsRow}>
           {BANNERS.map((_, i) => (
             <View
@@ -307,32 +327,38 @@ const HomeScreen = ({ navigation }: HomeScreenProps) => {
       </View>
     </ScrollView>
   );
-
-  
 };
 
-
-
 export default HomeScreen;
+
+/* ==================== STYLES ==================== */
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#f6f7fb", marginTop: 20 },
 
-  /* HEADER */
   header: {
     paddingHorizontal: 20,
     paddingVertical: 25,
     borderRadius: 25,
     marginHorizontal: 10,
   },
-  headerTopRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  headerTopRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
   menuContainer: { flexDirection: "row", alignItems: "center" },
   menuIcon: { fontSize: 24, marginRight: 8, color: "#fff" },
   headerSubtitle: { fontSize: 20, color: "#fff", fontWeight: "500" },
-  headerName: { fontSize: 28, fontWeight: "bold", color: "#fff", marginTop: 4, marginLeft: 25 },
+  headerName: {
+    fontSize: 28,
+    fontWeight: "bold",
+    color: "#fff",
+    marginTop: 4,
+    marginLeft: 25,
+  },
   bellIcon: { fontSize: 22, color: "#fff" },
 
-  /* BANNER */
   bannerContainer: {
     width: SCREEN_WIDTH,
     marginTop: 10,
@@ -356,11 +382,8 @@ const styles = StyleSheet.create({
     backgroundColor: "#ccc",
     marginHorizontal: 4,
   },
-  dotActive: {
-    backgroundColor: "#169AF9",
-  },
+  dotActive: { backgroundColor: "#169AF9" },
 
-  /* BALANCE CARD */
   balanceCard: {
     backgroundColor: "#fff",
     marginHorizontal: 30,
@@ -373,7 +396,12 @@ const styles = StyleSheet.create({
   },
   dailyPaymentText: { fontSize: 16, fontWeight: "700", marginBottom: 6 },
   dueDateText: { fontSize: 14, color: "#333", marginBottom: 12 },
-  balanceLabel: { color: "#666", fontSize: 16, marginTop: 5, textAlign: "center" },
+  balanceLabel: {
+    color: "#666",
+    fontSize: 16,
+    marginTop: 5,
+    textAlign: "center",
+  },
   primaryButton: {
     backgroundColor: "#0A9EFA",
     borderRadius: 10,
@@ -382,6 +410,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   primaryButtonText: { color: "#fff", fontWeight: "700" },
+
   secondaryButton: {
     borderWidth: 1.5,
     borderColor: "#0A9EFA",
@@ -391,9 +420,9 @@ const styles = StyleSheet.create({
   },
   secondaryButtonText: { color: "#0A9EFA", fontWeight: "700" },
 
-  /* LOAN CARDS */
   sectionHeader: { marginTop: 25, marginHorizontal: 20 },
   sectionTitle: { fontSize: 18, fontWeight: "700", color: "#000" },
+
   loanCard: {
     backgroundColor: "#fff",
     marginHorizontal: 20,
@@ -404,11 +433,14 @@ const styles = StyleSheet.create({
     borderWidth: 3,
     borderColor: "#169AF9",
   },
-  loanRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  loanRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
   loanAmount: { fontSize: 20, fontWeight: "700", color: "#000" },
   loanAmountLabel: { color: "#666", fontSize: 12, marginTop: 2 },
 
-  /* TRANSACTIONS */
   transactionsContainer: {
     marginHorizontal: 20,
     marginTop: 10,
@@ -435,5 +467,9 @@ const styles = StyleSheet.create({
   transactionDate: { color: "#777", fontSize: 13 },
   transactionAmount: { fontSize: 16, fontWeight: "700", color: "#000" },
 
-  loadingContainer: { flex: 1, justifyContent: "center", alignItems: "center" },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+  },
 });
