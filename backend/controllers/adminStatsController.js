@@ -99,61 +99,89 @@ async function getDashboardStats(req, res) {
     const unpaidAmount = num(loanDistRes.rows[0]?.unpaid_amount);
     const overdueAmount = num(loanDistRes.rows[0]?.overdue_amount);
 
-    // ---------------------------
-    // NEW: PERFORMANCE (Total Repaid vs Total Payable)
-    // ---------------------------
-    // total_payable_sum: sum of total_payable for loans (only where total_payable present)
-    // total_repaid_sum: sum of transactions of type loan_payment / repayment
-    console.log(LOG_PREFIX, "Calculating performance metrics...");
-    const totalPayableRes = await db.query(
-      `
-      SELECT COALESCE(SUM(COALESCE(total_payable, 0)), 0) AS total_payable_sum
-      FROM loans
-      `
-    );
-    const totalRepaidRes = await db.query(
-      `
-      SELECT COALESCE(SUM(amount), 0) AS total_repaid_sum
-      FROM transactions
-      WHERE type IN ('loan_payment','repayment')
-      `
-    );
+ // ---------------------------
+// NEW: PERFORMANCE (Total Repaid)
+// ---------------------------
+console.log(LOG_PREFIX, "Calculating performance metrics...");
 
-    const totalPayableSum = num(totalPayableRes.rows[0]?.total_payable_sum);
-    const totalRepaidSum = num(totalRepaidRes.rows[0]?.total_repaid_sum);
+// authoritative repayment ledger = repayment_history.type='payment'
+const totalRepaidRes = await db.query(
+  `
+  SELECT COALESCE(SUM(amount),0) AS total_repaid_sum
+  FROM repayment_history
+  WHERE LOWER(type) = 'payment'
+  `
+);
 
-    const performancePercent = totalPayableSum === 0 ? 0 : Math.round((totalRepaidSum / totalPayableSum) * 100);
+const totalRepaidSum = num(totalRepaidRes.rows[0]?.total_repaid_sum);
 
-    console.log(LOG_PREFIX, "Performance:", { totalPayableSum, totalRepaidSum, performancePercent });
+// total payable across all deployed loans
+const totalPayableRes = await db.query(
+  `
+  SELECT COALESCE(SUM(total_payable),0) AS total_payable_sum
+  FROM loans
+  WHERE disbursed_at IS NOT NULL
+  `
+);
 
-    // ---------------------------
-    // NEW: PORTFOLIO (Active Principal vs Total Principal Lent Out)
-    // ---------------------------
-    console.log(LOG_PREFIX, "Calculating portfolio metrics...");
-    // activePrincipal: principal currently active (status = 'active')
-    // totalPrincipalLent: sum of principal for loans that have been disbursed or are active/completed/overdue/paid
-    const activePrincipalRes = await db.query(
-      `
-      SELECT COALESCE(SUM(COALESCE(principal, disbursed_amount, 0)), 0) AS active_principal
-      FROM loans
-      WHERE LOWER(status) = 'active'
-      `
-    );
+const totalPayableSum = num(totalPayableRes.rows[0]?.total_payable_sum);
+const performancePercent =
+  totalPayableSum === 0
+    ? 0
+    : Math.round((totalRepaidSum / totalPayableSum) * 100);
 
-    const totalPrincipalLentRes = await db.query(
-      `
-      SELECT COALESCE(SUM(COALESCE(disbursed_amount, principal, 0)), 0) AS total_principal_lent
-      FROM loans
-      WHERE disbursed_at IS NOT NULL
-         OR LOWER(status) IN ('active','completed','paid','overdue')
-      `
-    );
+console.log(LOG_PREFIX, "Performance:", {
+  totalPayableSum,
+  totalRepaidSum,
+  performancePercent,
+});
 
-    const activePrincipal = num(activePrincipalRes.rows[0]?.active_principal);
-    const totalPrincipalLent = num(totalPrincipalLentRes.rows[0]?.total_principal_lent);
-    const portfolioPercent = totalPrincipalLent === 0 ? 0 : Math.round((activePrincipal / totalPrincipalLent) * 100);
+// ---------------------------
+// NEW: PORTFOLIO (Capital Deployed)
+// ---------------------------
+console.log(LOG_PREFIX, "Calculating portfolio metrics...");
 
-    console.log(LOG_PREFIX, "Portfolio:", { activePrincipal, totalPrincipalLent, portfolioPercent });
+const activePrincipalRes = await db.query(
+  `
+  SELECT COALESCE(SUM(
+    COALESCE(approved_principal, disbursed_amount, 0)
+  ),0) AS active_principal
+  FROM loans
+  WHERE LOWER(status) = 'active'
+     OR disbursed_at IS NOT NULL
+  `
+);
+
+const activePrincipal = num(activePrincipalRes.rows[0]?.active_principal);
+
+// total principal ever deployed (sum of approved_principal for all disbursed loans)
+const totalPrincipalLentRes = await db.query(
+  `
+  SELECT COALESCE(SUM(
+    COALESCE(approved_principal, disbursed_amount, 0)
+  ),0) AS total_principal_lent
+  FROM loans
+  WHERE disbursed_at IS NOT NULL
+  `
+);
+
+const totalPrincipalLent = num(totalPrincipalLentRes.rows[0]?.total_principal_lent);
+
+const portfolioPercent =
+  totalPrincipalLent === 0
+    ? 0
+    : Math.round((activePrincipal / totalPrincipalLent) * 100);
+
+console.log(LOG_PREFIX, "Portfolio:", {
+  activePrincipal,
+  totalPrincipalLent,
+  portfolioPercent,
+});
+
+// ---------------------------
+// RISK (unchanged)
+// ---------------------------
+
 
     // ---------------------------
     // NEW: RISK (Overdue Amount vs Active Portfolio Balance)
