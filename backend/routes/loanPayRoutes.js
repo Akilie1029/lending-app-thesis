@@ -22,7 +22,7 @@ async function pushNotification() {
  * Borrower repayment flow:
  *  ✓ Insert transaction
  *  ✓ Insert repayment_history (type = 'payment')
- *  ✓ Recalculate remaining_balance (using same transaction client)
+ *  ✓ Recalculate remaining_balance
  *  ✓ Mark loan as completed if paid
  */
 
@@ -53,7 +53,7 @@ router.post("/pay", auth, async (req, res) => {
     await client.query("BEGIN");
     console.log(`🔍 Verifying loan for loanId=${loanId} user=${userId}`);
 
-    // Validate loan ownership (FOR UPDATE locks row in this transaction client)
+    // Validate loan ownership
     const loanQ = await client.query(
       `SELECT * FROM loans WHERE id = $1 AND user_id = $2 LIMIT 1 FOR UPDATE`,
       [loanId, userId]
@@ -68,7 +68,9 @@ router.post("/pay", auth, async (req, res) => {
     const loan = loanQ.rows[0];
 
     const remainingBefore = Number(
-      loan.remaining_balance != null ? loan.remaining_balance : loan.total_payable || 0
+      loan.remaining_balance != null
+        ? loan.remaining_balance
+        : loan.total_payable || 0
     );
 
     if (remainingBefore <= 0) {
@@ -108,7 +110,7 @@ router.post("/pay", auth, async (req, res) => {
     console.log("✅ Transaction inserted:", transaction.id);
 
     // --------------------------------------------------------
-    // Insert into repayment_history (type = 'payment')
+    // Insert into repayment_history (NEW REQUIRED FIELD → type = 'payment')
     // --------------------------------------------------------
     const rhRes = await client.query(
       `
@@ -127,13 +129,13 @@ router.post("/pay", auth, async (req, res) => {
     console.log("✅ Repayment history inserted:", repayment.id, "type=", repayment.type);
 
     // --------------------------------------------------------
-    // Recalculate remaining balance using the same transaction client
+    // Update loan remaining balance (recalc service)
     // --------------------------------------------------------
-    const newRemaining = await recalcLoanRemainingBalance(loanId, client);
+    const newRemaining = await recalcLoanRemainingBalance(loanId);
 
     console.log(`🔁 New remaining balance: ${newRemaining}`);
 
-    // Fetch updated loan (within same transaction)
+    // Fetch updated loan
     const updatedLoanRes = await client.query(
       `SELECT * FROM loans WHERE id = $1 LIMIT 1`,
       [loanId]
@@ -144,9 +146,7 @@ router.post("/pay", auth, async (req, res) => {
 
     console.log("✅ Payment complete for loanId=", loanId);
 
-    // Notifications are a no-op in this deployment
-    pushNotification();
-    if (newRemaining <= 0) pushNotification();
+    pushNotification(); // (no-op)
 
     return res.json({
       success: true,
