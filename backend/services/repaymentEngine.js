@@ -1,30 +1,57 @@
 const db = require("../db");
 
+/**
+ * Repayment Engine
+ *
+ * - recalcLoanRemainingBalance(loanId)
+ * - markOverdueInstallments(loanId)
+ * - applyLateFeesIfNeeded(loanId, userId, opts)
+ *
+ * Notes:
+ * - We use a dedicated client + transaction where appropriate to avoid race conditions and
+ *   Postgres parameter type inference issues (integer vs numeric).
+ * - All updates that write numeric columns cast the parameter to ::numeric explicitly.
+ */
+
 // Helper to safely convert DB values to number
 const num = (v) => (v == null ? 0 : Number(v));
 
 /**
  * Recalculate remaining balance using repayment_history sums and update loan row.
- * Also set loan.status = 'completed' if remaining <= 0 and set completed_at.
+ * Also sets loan.status = 'completed' if remaining <= 0 and sets completed_at.
+ *
+ * Uses a dedicated client transaction to ensure consistent reads and writes.
  */
 async function recalcLoanRemainingBalance(loanId) {
   if (!loanId) {
     console.warn("recalcLoanRemainingBalance called without loanId");
     return null;
   }
+
+  const client = await db.connect();
   try {
-    const loanQ = await db.query(
-      `SELECT id, total_payable FROM loans WHERE id = $1 LIMIT 1`,
+    await client.query("BEGIN");
+
+    // Lock the loan row to avoid concurrent updates
+    const loanQ = await client.query(
+      `SELECT id, COALESCE(total_payable,0) AS total_payable
+       FROM loans
+       WHERE id = $1
+       LIMIT 1
+       FOR UPDATE`,
       [loanId]
     );
+
     if (loanQ.rows.length === 0) {
+      await client.query("ROLLBACK");
       console.warn("recalcLoanRemainingBalance: loan not found", loanId);
       return null;
     }
 
     const totalPayable = num(loanQ.rows[0].total_payable);
 
-    const paidQ = await db.query(
+    // Sum repayment_history.amount for this loan (use same client)
+    const paidQ = await client.query(
       `SELECT COALESCE(SUM(amount), 0) AS paid FROM repayment_history WHERE loan_id = $1`,
       [loanId]
     );
@@ -32,8 +59,8 @@ async function recalcLoanRemainingBalance(loanId) {
 
     const remaining = Math.max(totalPayable - paid, 0);
 
-    // *** FIXED: cast all $1 references to numeric ***
-    await db.query(
+    // Use explicit numeric casts to avoid integer vs numeric inference errors
+    await client.query(
       `
       UPDATE loans
       SET remaining_balance = $1::numeric,
@@ -44,18 +71,32 @@ async function recalcLoanRemainingBalance(loanId) {
       [remaining, loanId]
     );
 
+    await client.query("COMMIT");
+
     console.log(
       `recalcLoanRemainingBalance: loanId=${loanId} total=${totalPayable} paid=${paid} remaining=${remaining}`
     );
-    return remaining;
+    return Number(remaining);
   } catch (err) {
+    try {
+      await client.query("ROLLBACK");
+    } catch (rbErr) {
+      console.error("❌ recalcLoanRemainingBalance rollback error:", rbErr);
+    }
     console.error("❌ recalcLoanRemainingBalance ERROR:", err);
     throw err;
+  } finally {
+    try {
+      client.release();
+    } catch (releaseErr) {
+      console.error("❌ Error releasing DB client (recalcLoanRemainingBalance):", releaseErr);
+    }
   }
 }
 
 /**
  * Marks overdue installments based on due_date < today.
+ * This function is read/write but light-weight; it uses the pool directly.
  */
 async function markOverdueInstallments(loanId) {
   if (!loanId) {
@@ -91,6 +132,7 @@ async function markOverdueInstallments(loanId) {
 
 /**
  * Apply late fees when threshold of overdue installments is met.
+ * Uses a client transaction for atomicity.
  */
 async function applyLateFeesIfNeeded(loanId, userId, opts = {}) {
   if (!loanId || !userId) {
@@ -116,11 +158,14 @@ async function applyLateFeesIfNeeded(loanId, userId, opts = {}) {
     );
     const lateCount = Number(overdueQ.rows[0]?.late_count || 0);
 
+    console.log(`applyLateFeesIfNeeded: loanId=${loanId} overdue_count=${lateCount}`);
+
     if (lateCount < THRESHOLD) {
       await client.query("ROLLBACK");
       return { applied: false, reason: "not_enough_overdue", lateCount };
     }
 
+    // Prevent duplicate late-fees within the duplicate window
     const dupQ = await client.query(
       `
       SELECT COUNT(*)::int AS cnt
@@ -154,6 +199,7 @@ async function applyLateFeesIfNeeded(loanId, userId, opts = {}) {
       [loanId, userId, LATE_FEE_AMOUNT]
     );
 
+    // Recalculate within same transaction
     const totalQ = await client.query(
       `SELECT COALESCE(total_payable,0) AS total_payable FROM loans WHERE id = $1 LIMIT 1`,
       [loanId]
@@ -164,12 +210,10 @@ async function applyLateFeesIfNeeded(loanId, userId, opts = {}) {
       [loanId]
     );
 
-    const remaining = Math.max(
-      Number(totalQ.rows[0].total_payable) - Number(paidQ.rows[0].paid),
-      0
-    );
+    const totalPayable = Number(totalQ.rows[0]?.total_payable || 0);
+    const paid = Number(paidQ.rows[0]?.paid || 0);
+    const remaining = Math.max(totalPayable - paid, 0);
 
-    // *** FIXED: cast to numeric ***
     await client.query(
       `
       UPDATE loans
@@ -183,18 +227,30 @@ async function applyLateFeesIfNeeded(loanId, userId, opts = {}) {
 
     await client.query("COMMIT");
 
+    console.log(`applyLateFeesIfNeeded: applied late fee loanId=${loanId} new_remaining=${remaining}`);
+
     return {
       applied: true,
       amount: LATE_FEE_AMOUNT,
       remaining_balance: remaining,
-      lateCount
+      lateCount,
+      transaction: txRes.rows[0],
+      repayment_history: rhRes.rows[0],
     };
   } catch (err) {
-    await client.query("ROLLBACK");
+    try {
+      await client.query("ROLLBACK");
+    } catch (rbErr) {
+      console.error("❌ applyLateFeesIfNeeded rollback error:", rbErr);
+    }
     console.error("❌ applyLateFeesIfNeeded ERROR:", err);
     throw err;
   } finally {
-    client.release();
+    try {
+      client.release();
+    } catch (releaseErr) {
+      console.error("❌ Error releasing DB client (applyLateFeesIfNeeded):", releaseErr);
+    }
   }
 }
 
