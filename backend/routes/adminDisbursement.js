@@ -1,4 +1,3 @@
-// routes/adminDisbursement.js
 const express = require("express");
 const router = express.Router();
 const db = require("../db");
@@ -256,15 +255,23 @@ router.post("/disburse/:loanId", auth, admin, async (req, res) => {
       [userId, loanId, approvedPrincipal, loan.payout_method || null, payoutReference, disbursedAt]
     );
 
-    // 3) Disbursement history
+    // 3) DISBURSEMENT HISTORY — FIXED VERSION
     const dhRes = await client.query(
       `
       INSERT INTO disbursement_history
-        (loan_id, user_id, amount, payout_method, payout_reference, disbursed_at)
-      VALUES ($1, $2, $3, $4, $5, $6)
-      RETURNING id, disbursed_at
+        (loan_id, user_id, amount, payout_method, payout_details, payout_reference, disbursed_at, date_released)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $7)
+      RETURNING id, disbursed_at, date_released
       `,
-      [loanId, userId, approvedPrincipal, loan.payout_method || null, payoutReference, disbursedAt]
+      [
+        loanId,
+        userId,
+        approvedPrincipal,
+        loan.payout_method || null,
+        loan.payout_details || null,
+        payoutReference,
+        disbursedAt
+      ]
     );
 
     // 4) Update loan → active
