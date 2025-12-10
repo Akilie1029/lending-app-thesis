@@ -6,23 +6,12 @@ const admin = require("../adminMiddleware");
 
 const LOG_PREFIX = "[ADMIN_DISBURSE]";
 
-/**
- * Notifications Disabled (safe no-op)
- */
+/* Notifications disabled */
 async function pushNotification() {
   return;
 }
 
-/**
- * Admin Disbursement routes
- *
- * - GET  /api/admin/disburse/pending
- * - POST /api/admin/disburse/:loanId
- */
-
-// -------------------------
-// Utility: repayment schedule generator
-// -------------------------
+/* Repayment schedule generator */
 function generateSchedule(loan) {
   const days = Number(loan.days || 0);
   const daily = Number(loan.approved_daily_payment ?? 0);
@@ -32,7 +21,7 @@ function generateSchedule(loan) {
   start.setDate(start.getDate() + 1);
 
   for (let i = 0; i < days; i++) {
-    const due = new Date(start.getTime() + i * 24 * 60 * 60 * 1000);
+    const due = new Date(start.getTime() + i * 86400000);
     list.push({
       loan_id: loan.id,
       installment_number: i + 1,
@@ -46,7 +35,6 @@ function generateSchedule(loan) {
       paid_at: null,
     });
   }
-
   return list;
 }
 
@@ -83,38 +71,17 @@ function buildInsertForScheduleRows(rows, columnsPresent) {
       rowPlaceholders.push(`$${rowIdx * uniqueCols.length + colIdx + 1}`);
 
       switch (col) {
-        case "loan_id":
-          values.push(r.loan_id);
-          break;
-        case "installment_number":
-          values.push(r.installment_number ?? r.day_number ?? null);
-          break;
-        case "day_number":
-          values.push(r.day_number ?? r.installment_number ?? null);
-          break;
-        case "amount_due":
-          values.push(r.amount_due ?? r.expected_amount ?? null);
-          break;
-        case "expected_amount":
-          values.push(r.expected_amount ?? r.amount_due ?? null);
-          break;
-        case "due_date":
-          values.push(r.due_date);
-          break;
-        case "paid":
-          values.push(r.paid ? true : false);
-          break;
-        case "overdue":
-          values.push(r.overdue ? true : false);
-          break;
-        case "status":
-          values.push(r.status ?? "pending");
-          break;
-        case "paid_at":
-          values.push(r.paid_at ?? null);
-          break;
-        default:
-          values.push(null);
+        case "loan_id": values.push(r.loan_id); break;
+        case "installment_number": values.push(r.installment_number); break;
+        case "day_number": values.push(r.day_number); break;
+        case "amount_due": values.push(r.amount_due); break;
+        case "expected_amount": values.push(r.expected_amount); break;
+        case "due_date": values.push(r.due_date); break;
+        case "paid": values.push(false); break;
+        case "overdue": values.push(false); break;
+        case "status": values.push("pending"); break;
+        case "paid_at": values.push(null); break;
+        default: values.push(null);
       }
     });
 
@@ -129,15 +96,14 @@ function buildInsertForScheduleRows(rows, columnsPresent) {
   return { sql, values };
 }
 
-// -------------------------------------------------------------
-// GET /api/admin/disburse/pending
-// -------------------------------------------------------------
+/* ---------------------------
+   GET /api/admin/disburse/pending
+---------------------------- */
 router.get("/disburse/pending", auth, admin, async (req, res) => {
   try {
     console.log(LOG_PREFIX, "Fetching pending disbursements...");
 
-    const q = await db.query(
-      `
+    const q = await db.query(`
       SELECT
         l.id,
         l.user_id,
@@ -163,8 +129,7 @@ router.get("/disburse/pending", auth, admin, async (req, res) => {
       LEFT JOIN users u ON u.id = l.user_id
       WHERE LOWER(COALESCE(l.status, '')) = 'approved'
       ORDER BY l.approved_at ASC NULLS LAST
-      `
-    );
+    `);
 
     return res.json(q.rows);
   } catch (err) {
@@ -173,16 +138,16 @@ router.get("/disburse/pending", auth, admin, async (req, res) => {
   }
 });
 
-// -------------------------------------------------------------
-// POST /api/admin/disburse/:loanId
-// -------------------------------------------------------------
+/* ---------------------------
+   POST /api/admin/disburse/:loanId
+---------------------------- */
 router.post("/disburse/:loanId", auth, admin, async (req, res) => {
   const loanId = req.params.loanId;
   if (!loanId) return res.status(400).json({ error: "loanId is required" });
 
   const payoutReference = req.body?.payout_reference || null;
-  const client = await db.connect();
 
+  const client = await db.connect();
   try {
     await client.query("BEGIN");
 
@@ -204,7 +169,7 @@ router.post("/disburse/:loanId", auth, admin, async (req, res) => {
       await client.query("ROLLBACK");
       return res.status(400).json({
         error: "INVALID_STATUS",
-        message: "Loan must be in status 'approved' before disbursement",
+        message: "Loan must be 'approved' before disbursement",
         current_status: loan.status,
       });
     }
@@ -213,23 +178,19 @@ router.post("/disburse/:loanId", auth, admin, async (req, res) => {
       await client.query("ROLLBACK");
       return res.status(400).json({
         error: "NO_APPROVED_PRINCIPAL",
-        message: "Loan is missing approved_principal — cannot disburse.",
+        message: "Missing approved_principal.",
       });
     }
 
     const approvedPrincipal = Number(loan.approved_principal);
-    const approvedTotalPayable = Number(
-      loan.approved_total_payable ?? loan.total_payable ?? 0
-    );
-    const approvedDailyPayment = Number(
-      loan.approved_daily_payment ?? loan.daily_payment ?? 0
-    );
+    const approvedTotalPayable = Number(loan.approved_total_payable ?? loan.total_payable ?? 0);
+    const approvedDailyPayment = Number(loan.approved_daily_payment ?? loan.daily_payment ?? 0);
     const days = Number(loan.days || 0);
     const userId = loan.user_id;
 
     const disbursedAt = new Date().toISOString();
 
-    // 1) Repayment schedule
+    // 1) Repayment Schedule
     const scheduleRows = generateSchedule({
       id: loan.id,
       days,
@@ -238,51 +199,49 @@ router.post("/disburse/:loanId", auth, admin, async (req, res) => {
 
     const columnsPresent = await getRepaymentScheduleColumns(client);
     const { sql, values } = buildInsertForScheduleRows(scheduleRows, columnsPresent);
+    if (sql) await client.query(sql, values);
 
-    if (sql) {
-      await client.query(sql, values);
-    }
-
-    // 2) Transaction entry
+    // 2) Transaction
     const txRes = await client.query(
       `
       INSERT INTO transactions
         (user_id, loan_id, type, amount, payment_method, reference_no, created_at)
-      VALUES
-        ($1, $2, 'loan_disbursement', $3, $4, $5, $6)
+      VALUES ($1, $2, 'loan_disbursement', $3, $4, $5, $6)
       RETURNING id, amount, created_at
       `,
-      [userId, loanId, approvedPrincipal, loan.payout_method || null, payoutReference, disbursedAt]
+      [userId, loanId, approvedPrincipal, loan.payout_method, payoutReference, disbursedAt]
     );
 
-    // 3) DISBURSEMENT HISTORY — FIXED VERSION
+    // 3) FIXED: Disbursement History (MUST include id)
     const dhRes = await client.query(
       `
       INSERT INTO disbursement_history
-        (loan_id, user_id, amount, payout_method, payout_details, payout_reference, disbursed_at, date_released)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $7)
-      RETURNING id, disbursed_at, date_released
+        (id, loan_id, user_id, amount, payout_method, payout_details, payout_reference, disbursed_at, date_released)
+      VALUES (
+        uuid_generate_v4(),  -- ✅ FIXED: NOW GENERATES ID
+        $1, $2, $3, $4, $5, $6, $7, $7
+      )
+      RETURNING *
       `,
       [
         loanId,
         userId,
         approvedPrincipal,
-        loan.payout_method || null,
-        loan.payout_details || null,
+        loan.payout_method,
+        loan.payout_details,
         payoutReference,
         disbursedAt
       ]
     );
 
-    // 4) Update loan → active
+    // 4) Update Loan → active
     const updatedLoanQ = await client.query(
       `
       UPDATE loans
-      SET
-        status = 'active',
-        disbursed_at = $1,
-        remaining_balance = $2,
-        disbursed_amount = $3
+      SET status = 'active',
+          disbursed_at = $1,
+          remaining_balance = $2,
+          disbursed_amount = $3
       WHERE id = $4
       RETURNING *
       `,
@@ -291,7 +250,6 @@ router.post("/disburse/:loanId", auth, admin, async (req, res) => {
 
     await client.query("COMMIT");
 
-    // 🔕 No notifications
     pushNotification();
 
     return res.json({
@@ -301,11 +259,10 @@ router.post("/disburse/:loanId", auth, admin, async (req, res) => {
       disbursement_history: dhRes.rows[0],
       schedule_created: scheduleRows.length,
     });
+
   } catch (err) {
     console.error(LOG_PREFIX, "❌ Disbursement ERROR:", err);
-    try {
-      await client.query("ROLLBACK");
-    } catch (e) {}
+    try { await client.query("ROLLBACK"); } catch (e) {}
     return res.status(500).json({ error: "Server error", details: err.message });
   } finally {
     client.release();
