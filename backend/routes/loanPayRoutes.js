@@ -129,7 +129,7 @@ router.post("/pay", auth, async (req, res) => {
     console.log("✅ Repayment history inserted:", repayment.id, "type=", repayment.type);
 
     // --------------------------------------------------------
-    // Update loan remaining balance
+    // Update loan remaining balance (recalc service)
     // --------------------------------------------------------
     const newRemaining = await recalcLoanRemainingBalance(loanId);
 
