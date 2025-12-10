@@ -20,7 +20,7 @@ const LOG = "[ADMIN_ALL_LOANS]";
  *   borrower_rejected
  */
 
-router.get("/admin/all-loans", auth, admin, async (req, res) => {
+router.get("/all-loans", auth, admin, async (req, res) => {
   try {
     console.log(LOG, "📡 Request by admin:", req.user?.id);
 
