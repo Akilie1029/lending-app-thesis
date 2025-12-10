@@ -19,13 +19,11 @@ async function pushNotification() {
  *  - amount (number)
  *  - payment_method (string, optional)
  *
- * Normal loan repayment flow:
+ * Borrower repayment flow:
  *  ✓ Insert transaction
- *  ✓ Insert repayment_history
+ *  ✓ Insert repayment_history (type = 'payment')
  *  ✓ Recalculate remaining_balance
- *  ✓ Mark loan as completed if fully paid
- *
- * Notifications are disabled for stability.
+ *  ✓ Mark loan as completed if paid
  */
 
 router.post("/pay", auth, async (req, res) => {
@@ -55,7 +53,7 @@ router.post("/pay", auth, async (req, res) => {
     await client.query("BEGIN");
     console.log(`🔍 Verifying loan for loanId=${loanId} user=${userId}`);
 
-    // Check loan ownership
+    // Validate loan ownership
     const loanQ = await client.query(
       `SELECT * FROM loans WHERE id = $1 AND user_id = $2 LIMIT 1 FOR UPDATE`,
       [loanId, userId]
@@ -92,11 +90,17 @@ router.post("/pay", auth, async (req, res) => {
       `💳 Applying payment: loan=${loanId} pay=${appliedAmount} requested=${payAmount} remaining=${remainingBefore}`
     );
 
-    // Insert transaction
+    // --------------------------------------------------------
+    // Insert into transactions
+    // --------------------------------------------------------
     const txRes = await client.query(
       `
-      INSERT INTO transactions (user_id, loan_id, type, amount, payment_method, created_at)
-      VALUES ($1, $2, 'loan_payment', $3, $4, NOW())
+      INSERT INTO transactions (
+        user_id, loan_id, type, amount, payment_method, created_at
+      )
+      VALUES (
+        $1, $2, 'loan_payment', $3, $4, NOW()
+      )
       RETURNING id, loan_id, amount, payment_method, created_at
       `,
       [userId, loanId, appliedAmount, payment_method || "cash"]
@@ -105,20 +109,28 @@ router.post("/pay", auth, async (req, res) => {
     const transaction = txRes.rows[0];
     console.log("✅ Transaction inserted:", transaction.id);
 
-    // Insert repayment_history
+    // --------------------------------------------------------
+    // Insert into repayment_history (NEW REQUIRED FIELD → type = 'payment')
+    // --------------------------------------------------------
     const rhRes = await client.query(
       `
-      INSERT INTO repayment_history (loan_id, user_id, amount, created_at)
-      VALUES ($1, $2, $3, NOW())
-      RETURNING id, amount, created_at
+      INSERT INTO repayment_history (
+        loan_id, user_id, amount, type, created_at
+      )
+      VALUES (
+        $1, $2, $3, 'payment', NOW()
+      )
+      RETURNING id, amount, created_at, type
       `,
       [loanId, userId, appliedAmount]
     );
 
     const repayment = rhRes.rows[0];
-    console.log("✅ Repayment history inserted:", repayment.id);
+    console.log("✅ Repayment history inserted:", repayment.id, "type=", repayment.type);
 
-    // Recalculate remaining balance
+    // --------------------------------------------------------
+    // Update loan remaining balance
+    // --------------------------------------------------------
     const newRemaining = await recalcLoanRemainingBalance(loanId);
 
     console.log(`🔁 New remaining balance: ${newRemaining}`);
@@ -132,13 +144,9 @@ router.post("/pay", auth, async (req, res) => {
 
     await client.query("COMMIT");
 
-    console.log("✅ Payment flow complete for loanId=", loanId);
+    console.log("✅ Payment complete for loanId=", loanId);
 
-    // --------------------------------------------------------
-    // Notifications DISABLED (no-op)
-    // --------------------------------------------------------
-    pushNotification();
-    if (newRemaining <= 0) pushNotification();
+    pushNotification(); // (no-op)
 
     return res.json({
       success: true,
@@ -150,6 +158,7 @@ router.post("/pay", auth, async (req, res) => {
         amount_paid: Number(transaction.amount),
         payment_method: transaction.payment_method,
         paid_at: transaction.created_at,
+        type: repayment.type,
         requested_amount: payAmount,
         applied_amount: appliedAmount,
       },
