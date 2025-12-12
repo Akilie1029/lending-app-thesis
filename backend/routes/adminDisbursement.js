@@ -1,3 +1,4 @@
+// routes/adminDisbursement.js
 const express = require("express");
 const router = express.Router();
 const db = require("../db");
@@ -201,7 +202,7 @@ router.post("/disburse/:loanId", auth, admin, async (req, res) => {
     const { sql, values } = buildInsertForScheduleRows(scheduleRows, columnsPresent);
     if (sql) await client.query(sql, values);
 
-    // 2) Transaction
+    // 2) Transaction (loan disbursement)
     const txRes = await client.query(
       `
       INSERT INTO transactions
@@ -212,13 +213,13 @@ router.post("/disburse/:loanId", auth, admin, async (req, res) => {
       [userId, loanId, approvedPrincipal, loan.payout_method, payoutReference, disbursedAt]
     );
 
-    // 3) FIXED: Disbursement History (MUST include id)
+    // 3) Disbursement history (ensure id is populated)
     const dhRes = await client.query(
       `
       INSERT INTO disbursement_history
         (id, loan_id, user_id, amount, payout_method, payout_details, payout_reference, disbursed_at, date_released)
       VALUES (
-        uuid_generate_v4(),  -- ✅ FIXED: NOW GENERATES ID
+        uuid_generate_v4(),
         $1, $2, $3, $4, $5, $6, $7, $7
       )
       RETURNING *
@@ -240,7 +241,7 @@ router.post("/disburse/:loanId", auth, admin, async (req, res) => {
       UPDATE loans
       SET status = 'active',
           disbursed_at = $1,
-          remaining_balance = $2,
+          remaining_balance = $2::numeric,
           disbursed_amount = $3
       WHERE id = $4
       RETURNING *
@@ -259,7 +260,6 @@ router.post("/disburse/:loanId", auth, admin, async (req, res) => {
       disbursement_history: dhRes.rows[0],
       schedule_created: scheduleRows.length,
     });
-
   } catch (err) {
     console.error(LOG_PREFIX, "❌ Disbursement ERROR:", err);
     try { await client.query("ROLLBACK"); } catch (e) {}

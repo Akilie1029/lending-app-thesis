@@ -9,7 +9,6 @@ const LOG_PREFIX = "[ADMIN_APPROVAL]";
 
 /**
  * Notifications DISABLED (safe no-op)
- * This ensures no crashes while keeping the structure ready for future use.
  */
 async function pushNotification() {
   return;
@@ -20,11 +19,6 @@ async function pushNotification() {
  *  - GET /pending
  *  - POST /approve/:loanId
  *  - POST /reject/:loanId
- *
- * Status Flow:
- *   pending → approved_pending_disburse → approved → active → completed
- *                     ↘ borrower_rejected
- *                     ↘ rejected
  */
 
 // ---------------------------------------------------------
@@ -124,18 +118,14 @@ router.post("/approve/:loanId", auth, admin, async (req, res) => {
 
     // Compute approved values
     const approvedInterest = Number((approvedPrincipal * 0.20).toFixed(2));
-    const approvedTotalPayable = Number(
-      (approvedPrincipal + approvedInterest).toFixed(2)
-    );
+    const approvedTotalPayable = Number((approvedPrincipal + approvedInterest).toFixed(2));
     const days = Number(loan.days);
-    const approvedDailyPayment =
-      days > 0
-        ? Number((approvedTotalPayable / days).toFixed(2))
-        : approvedTotalPayable;
+    const approvedDailyPayment = days > 0 ? Number((approvedTotalPayable / days).toFixed(2)) : approvedTotalPayable;
 
     const now = new Date().toISOString();
 
-    await client.query(
+    // IMPORTANT: Set remaining_balance to approved_total_payable so frontend sees correct remaining immediately
+    const updateQ = await client.query(
       `
       UPDATE loans
       SET
@@ -144,8 +134,10 @@ router.post("/approve/:loanId", auth, admin, async (req, res) => {
         approved_total_payable = $3,
         approved_daily_payment = $4,
         approved_at = $5,
+        remaining_balance = $3::numeric,
         status = 'approved_pending_disburse'
       WHERE id = $6
+      RETURNING *
       `,
       [
         approvedPrincipal,
@@ -166,16 +158,11 @@ router.post("/approve/:loanId", auth, admin, async (req, res) => {
 
     return res.json({
       message: "Loan approved (awaiting borrower acceptance)",
-      loanId,
-      approved_principal: approvedPrincipal,
-      approved_interest: approvedInterest,
-      approved_total_payable: approvedTotalPayable,
-      approved_daily_payment: approvedDailyPayment,
-      approved_at: now,
+      loan: updateQ.rows[0],
     });
   } catch (err) {
     console.error(LOG_PREFIX, "❌ Approve error:", err);
-    await client.query("ROLLBACK");
+    try { await client.query("ROLLBACK"); } catch (_) {}
     return res.status(500).json({
       error: "Server error",
       details: err.message,
@@ -190,7 +177,6 @@ router.post("/approve/:loanId", auth, admin, async (req, res) => {
 // ---------------------------------------------------------
 router.post("/reject/:loanId", auth, admin, async (req, res) => {
   const loanId = req.params.loanId;
-
   try {
     const now = new Date().toISOString();
 
@@ -215,11 +201,9 @@ router.post("/reject/:loanId", auth, admin, async (req, res) => {
     return res.json({ message: "Loan rejected", loanId });
   } catch (err) {
     console.error(LOG_PREFIX, "❌ Reject error:", err);
-    return res.status(500).json({
-      error: "Server error",
-      details: err.message,
-    });
+    return res.status(500).json({ error: "Server error", details: err.message });
   }
 });
 
 module.exports = router;
+z
