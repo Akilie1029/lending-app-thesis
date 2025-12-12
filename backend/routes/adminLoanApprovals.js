@@ -206,4 +206,3 @@ router.post("/reject/:loanId", auth, admin, async (req, res) => {
 });
 
 module.exports = router;
-z
