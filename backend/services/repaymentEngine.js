@@ -5,9 +5,12 @@ const db = require("../db");
 const num = (v) => (v == null ? 0 : Number(v));
 
 /**
- * Recalculate remaining balance using:
- *  → approved_total_payable (if present)
- *  → otherwise total_payable
+ * Recalculate remaining balance AND repayment day progress
+ *
+ * Authoritative rules:
+ * - remaining_balance = approved_total_payable - total_repaid
+ * - days_completed = FLOOR(total_repaid / approved_daily_payment)
+ * - remaining_days = GREATEST(days - days_completed, 0)
  *
  * Always use the provided client when inside a transaction.
  */
@@ -20,11 +23,13 @@ async function recalcLoanRemainingBalance(loanId, client = null) {
   const q = client && typeof client.query === "function" ? client : db;
 
   try {
-    // Fetch correct payable value
+    // Fetch authoritative loan data
     const loanQ = await q.query(
       `
       SELECT
         id,
+        days,
+        approved_daily_payment,
         COALESCE(approved_total_payable, total_payable) AS payable
       FROM loans
       WHERE id = $1
@@ -38,35 +43,66 @@ async function recalcLoanRemainingBalance(loanId, client = null) {
       return null;
     }
 
-    const payable = num(loanQ.rows[0].payable);
+    const loan = loanQ.rows[0];
 
-    // Sum all payments (repayment_history)
+    const payable = num(loan.payable);
+    const dailyPayment = num(loan.approved_daily_payment);
+    const totalDays = num(loan.days);
+
+    // Sum all repayments (including overpayments)
     const paidQ = await q.query(
-      `SELECT COALESCE(SUM(amount),0) AS paid FROM repayment_history WHERE loan_id = $1`,
+      `
+      SELECT COALESCE(SUM(amount),0) AS paid
+      FROM repayment_history
+      WHERE loan_id = $1
+      `,
       [loanId]
     );
 
-    const paid = num(paidQ.rows[0].paid);
-    const remaining = Math.max(payable - paid, 0);
+    const totalRepaid = num(paidQ.rows[0].paid);
 
-    // Update loan
+    // Monetary calculation
+    const remainingBalance = Math.max(payable - totalRepaid, 0);
+
+    // Day progress calculation (NO FRACTIONS)
+    let daysCompleted = 0;
+    if (dailyPayment > 0) {
+      daysCompleted = Math.floor(totalRepaid / dailyPayment);
+    }
+
+    const remainingDays = Math.max(totalDays - daysCompleted, 0);
+
+    // Persist authoritative values
     await q.query(
       `
       UPDATE loans
-      SET 
+      SET
         remaining_balance = $1::numeric,
-        status = CASE WHEN $1::numeric <= 0 THEN 'completed' ELSE status END,
-        completed_at = CASE WHEN $1::numeric <= 0 THEN COALESCE(completed_at, NOW()) ELSE completed_at END
-      WHERE id = $2
+        total_repaid = $2::numeric,
+        remaining_days = $3::int,
+        status = CASE
+          WHEN $1::numeric <= 0 THEN 'completed'
+          ELSE status
+        END,
+        completed_at = CASE
+          WHEN $1::numeric <= 0 THEN COALESCE(completed_at, NOW())
+          ELSE completed_at
+        END
+      WHERE id = $4
       `,
-      [remaining, loanId]
+      [remainingBalance, totalRepaid, remainingDays, loanId]
     );
 
     console.log(
-      `recalcLoanRemainingBalance: loanId=${loanId} approved/payable=${payable} paid=${paid} remaining=${remaining}`
+      `recalcLoanRemainingBalance: loanId=${loanId} paid=${totalRepaid} remaining=${remainingBalance} daysCompleted=${daysCompleted}/${totalDays}`
     );
 
-    return remaining;
+    return {
+      remaining_balance: remainingBalance,
+      total_repaid: totalRepaid,
+      remaining_days: remainingDays,
+      days_completed: daysCompleted,
+    };
   } catch (err) {
     console.error("❌ recalcLoanRemainingBalance ERROR:", err);
     throw err;
@@ -74,7 +110,7 @@ async function recalcLoanRemainingBalance(loanId, client = null) {
 }
 
 /**
- * Overdue marking stays unchanged
+ * Overdue marking unchanged
  */
 async function markOverdueInstallments(loanId) {
   if (!loanId) return { updated: 0 };
@@ -95,7 +131,7 @@ async function markOverdueInstallments(loanId) {
       [loanId, today]
     );
 
-    return { updated: res.rowCount, ids: res.rows.map(r => r.id) };
+    return { updated: res.rowCount, ids: res.rows.map((r) => r.id) };
   } catch (err) {
     console.error("❌ markOverdueInstallments ERROR:", err);
     throw err;
@@ -103,7 +139,7 @@ async function markOverdueInstallments(loanId) {
 }
 
 /**
- * Late fees unchanged EXCEPT recalculation now uses approved_total_payable
+ * Late fees logic unchanged
  */
 async function applyLateFeesIfNeeded(loanId, userId, opts = {}) {
   if (!loanId || !userId) return { applied: false };
@@ -126,7 +162,6 @@ async function applyLateFeesIfNeeded(loanId, userId, opts = {}) {
       return { applied: false, reason: "not_enough_overdue" };
     }
 
-    // Insert transaction
     await client.query(
       `
       INSERT INTO transactions (user_id, loan_id, type, amount, payment_method, created_at)
@@ -135,7 +170,6 @@ async function applyLateFeesIfNeeded(loanId, userId, opts = {}) {
       [userId, loanId, AMOUNT]
     );
 
-    // Insert repayment_history
     await client.query(
       `
       INSERT INTO repayment_history (loan_id,user_id,amount,is_late_fee,created_at)
@@ -144,43 +178,12 @@ async function applyLateFeesIfNeeded(loanId, userId, opts = {}) {
       [loanId, userId, AMOUNT]
     );
 
-    // Recalculate via same logic
-    const payQ = await client.query(
-      `
-      SELECT COALESCE(approved_total_payable, total_payable) AS payable
-      FROM loans WHERE id=$1 LIMIT 1
-      `,
-      [loanId]
-    );
-
-    const payable = num(payQ.rows[0].payable);
-
-    const paidQ = await client.query(
-      `SELECT COALESCE(SUM(amount),0) AS paid FROM repayment_history WHERE loan_id=$1`,
-      [loanId]
-    );
-
-    const paid = num(paidQ.rows[0].paid);
-    const remaining = Math.max(payable - paid, 0);
-
-    await client.query(
-      `
-      UPDATE loans
-      SET remaining_balance=$1::numeric,
-          status = CASE WHEN $1::numeric <= 0 THEN 'completed' ELSE status END,
-          completed_at = CASE WHEN $1::numeric <= 0 THEN COALESCE(completed_at, NOW()) ELSE completed_at END
-      WHERE id=$2
-      `,
-      [remaining, loanId]
-    );
+    // Recalculate using the same authoritative logic
+    await recalcLoanRemainingBalance(loanId, client);
 
     await client.query("COMMIT");
 
-    return {
-      applied: true,
-      lateCount,
-      remaining_balance: remaining
-    };
+    return { applied: true, lateCount };
   } catch (err) {
     await client.query("ROLLBACK");
     console.error("❌ applyLateFeesIfNeeded ERROR:", err);
