@@ -202,6 +202,10 @@ router.post("/disburse/:loanId", auth, admin, async (req, res) => {
     const { sql, values } = buildInsertForScheduleRows(scheduleRows, columnsPresent);
     if (sql) await client.query(sql, values);
 
+    // 🔑 AUTHORITATIVE FIRST DUE DATE (ADDED — NO OTHER LOGIC CHANGED)
+    const latestDueDate =
+      scheduleRows.length > 0 ? scheduleRows[0].due_date : null;
+
     // 2) Transaction (loan disbursement)
     const txRes = await client.query(
       `
@@ -235,18 +239,19 @@ router.post("/disburse/:loanId", auth, admin, async (req, res) => {
       ]
     );
 
-    // 4) Update Loan → active
+    // 4) Update Loan → active (ONLY latest_due_date ADDED)
     const updatedLoanQ = await client.query(
       `
       UPDATE loans
       SET status = 'active',
           disbursed_at = $1,
-          remaining_balance = $2::numeric,
-          disbursed_amount = $3
-      WHERE id = $4
+          latest_due_date = $2,
+          remaining_balance = $3::numeric,
+          disbursed_amount = $4
+      WHERE id = $5
       RETURNING *
       `,
-      [disbursedAt, approvedTotalPayable, approvedPrincipal, loanId]
+      [disbursedAt, latestDueDate, approvedTotalPayable, approvedPrincipal, loanId]
     );
 
     await client.query("COMMIT");
