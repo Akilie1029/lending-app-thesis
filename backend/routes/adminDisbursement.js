@@ -184,8 +184,12 @@ router.post("/disburse/:loanId", auth, admin, async (req, res) => {
     }
 
     const approvedPrincipal = Number(loan.approved_principal);
-    const approvedTotalPayable = Number(loan.approved_total_payable ?? loan.total_payable ?? 0);
-    const approvedDailyPayment = Number(loan.approved_daily_payment ?? loan.daily_payment ?? 0);
+    const approvedTotalPayable = Number(
+      loan.approved_total_payable ?? loan.total_payable ?? 0
+    );
+    const approvedDailyPayment = Number(
+      loan.approved_daily_payment ?? loan.daily_payment ?? 0
+    );
     const days = Number(loan.days || 0);
     const userId = loan.user_id;
 
@@ -202,7 +206,7 @@ router.post("/disburse/:loanId", auth, admin, async (req, res) => {
     const { sql, values } = buildInsertForScheduleRows(scheduleRows, columnsPresent);
     if (sql) await client.query(sql, values);
 
-    // 🔑 AUTHORITATIVE FIRST DUE DATE (ADDED — NO OTHER LOGIC CHANGED)
+    // 🔑 AUTHORITATIVE FIRST DUE DATE
     const latestDueDate =
       scheduleRows.length > 0 ? scheduleRows[0].due_date : null;
 
@@ -214,10 +218,17 @@ router.post("/disburse/:loanId", auth, admin, async (req, res) => {
       VALUES ($1, $2, 'loan_disbursement', $3, $4, $5, $6)
       RETURNING id, amount, created_at
       `,
-      [userId, loanId, approvedPrincipal, loan.payout_method, payoutReference, disbursedAt]
+      [
+        userId,
+        loanId,
+        approvedPrincipal,
+        loan.payout_method,
+        payoutReference,
+        disbursedAt,
+      ]
     );
 
-    // 3) Disbursement history (ensure id is populated)
+    // 3) Disbursement history
     const dhRes = await client.query(
       `
       INSERT INTO disbursement_history
@@ -235,11 +246,11 @@ router.post("/disburse/:loanId", auth, admin, async (req, res) => {
         loan.payout_method,
         loan.payout_details,
         payoutReference,
-        disbursedAt
+        disbursedAt,
       ]
     );
 
-    // 4) Update Loan → active (ONLY latest_due_date ADDED)
+    // 4) Update Loan → active
     const updatedLoanQ = await client.query(
       `
       UPDATE loans
@@ -247,11 +258,19 @@ router.post("/disburse/:loanId", auth, admin, async (req, res) => {
           disbursed_at = $1,
           latest_due_date = $2,
           remaining_balance = $3::numeric,
-          disbursed_amount = $4
+          disbursed_amount = $4,
+          remaining_days = days,
+          total_repaid = 0
       WHERE id = $5
       RETURNING *
       `,
-      [disbursedAt, latestDueDate, approvedTotalPayable, approvedPrincipal, loanId]
+      [
+        disbursedAt,
+        latestDueDate,
+        approvedTotalPayable,
+        approvedPrincipal,
+        loanId,
+      ]
     );
 
     await client.query("COMMIT");
@@ -267,7 +286,9 @@ router.post("/disburse/:loanId", auth, admin, async (req, res) => {
     });
   } catch (err) {
     console.error(LOG_PREFIX, "❌ Disbursement ERROR:", err);
-    try { await client.query("ROLLBACK"); } catch (e) {}
+    try {
+      await client.query("ROLLBACK");
+    } catch (e) {}
     return res.status(500).json({ error: "Server error", details: err.message });
   } finally {
     client.release();
