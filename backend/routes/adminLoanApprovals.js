@@ -18,7 +18,7 @@ async function pushNotification() {
  * Handles:
  *  - GET /pending
  *  - POST /approve/:loanId
- *  - POST /reject/:loanId
+ *  - POST /loan/:loanId/reject
  */
 
 // ---------------------------------------------------------
@@ -116,15 +116,18 @@ router.post("/approve/:loanId", auth, admin, async (req, res) => {
       });
     }
 
-    // Compute approved values
     const approvedInterest = Number((approvedPrincipal * 0.20).toFixed(2));
-    const approvedTotalPayable = Number((approvedPrincipal + approvedInterest).toFixed(2));
+    const approvedTotalPayable = Number(
+      (approvedPrincipal + approvedInterest).toFixed(2)
+    );
     const days = Number(loan.days);
-    const approvedDailyPayment = days > 0 ? Number((approvedTotalPayable / days).toFixed(2)) : approvedTotalPayable;
+    const approvedDailyPayment =
+      days > 0
+        ? Number((approvedTotalPayable / days).toFixed(2))
+        : approvedTotalPayable;
 
     const now = new Date().toISOString();
 
-    // IMPORTANT: Set remaining_balance to approved_total_payable so frontend sees correct remaining immediately
     const updateQ = await client.query(
       `
       UPDATE loans
@@ -151,9 +154,6 @@ router.post("/approve/:loanId", auth, admin, async (req, res) => {
 
     await client.query("COMMIT");
 
-    console.log(LOG_PREFIX, "Loan approved (pending borrower acceptance).");
-
-    // 🔕 Notifications disabled
     pushNotification();
 
     return res.json({
@@ -162,7 +162,9 @@ router.post("/approve/:loanId", auth, admin, async (req, res) => {
     });
   } catch (err) {
     console.error(LOG_PREFIX, "❌ Approve error:", err);
-    try { await client.query("ROLLBACK"); } catch (_) {}
+    try {
+      await client.query("ROLLBACK");
+    } catch (_) {}
     return res.status(500).json({
       error: "Server error",
       details: err.message,
@@ -173,9 +175,9 @@ router.post("/approve/:loanId", auth, admin, async (req, res) => {
 });
 
 // ---------------------------------------------------------
-// ADMIN REJECTS LOAN
+// ADMIN REJECTS LOAN  ✅ FIXED ROUTE
 // ---------------------------------------------------------
-router.post("/reject/:loanId", auth, admin, async (req, res) => {
+router.post("/loan/:loanId/reject", auth, admin, async (req, res) => {
   const loanId = req.params.loanId;
   try {
     const now = new Date().toISOString();
@@ -195,13 +197,15 @@ router.post("/reject/:loanId", auth, admin, async (req, res) => {
       return res.status(404).json({ error: "Loan not found" });
     }
 
-    // 🔕 Notifications disabled
     pushNotification();
 
     return res.json({ message: "Loan rejected", loanId });
   } catch (err) {
     console.error(LOG_PREFIX, "❌ Reject error:", err);
-    return res.status(500).json({ error: "Server error", details: err.message });
+    return res.status(500).json({
+      error: "Server error",
+      details: err.message,
+    });
   }
 });
 
