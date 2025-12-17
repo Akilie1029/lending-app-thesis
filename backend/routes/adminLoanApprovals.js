@@ -175,22 +175,19 @@ router.post("/approve/:loanId", auth, admin, async (req, res) => {
 });
 
 // ---------------------------------------------------------
-// ADMIN REJECTS LOAN  ✅ FIXED ROUTE
+// ADMIN REJECTS LOAN  ✅ FIXED (removed rejected_at)
 // ---------------------------------------------------------
 router.post("/loan/:loanId/reject", auth, admin, async (req, res) => {
   const loanId = req.params.loanId;
   try {
-    const now = new Date().toISOString();
-
     const q = await db.query(
       `
       UPDATE loans
-      SET status = 'rejected',
-          rejected_at = $1
-      WHERE id = $2
+      SET status = 'rejected'
+      WHERE id = $1
       RETURNING id, user_id
       `,
-      [now, loanId]
+      [loanId]
     );
 
     if (!q.rows.length) {
