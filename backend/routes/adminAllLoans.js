@@ -28,9 +28,9 @@ router.get("/all-loans", auth, admin, async (req, res) => {
     const params = [];
     let idx = 1;
 
-    // ----------------------------------------
+    // --------------------------------------------------
     // SEARCH (borrower name OR loan id)
-    // ----------------------------------------
+    // --------------------------------------------------
     if (q) {
       where.push(
         `(u.full_name ILIKE $${idx} OR CAST(l.id AS TEXT) ILIKE $${idx})`
@@ -39,19 +39,27 @@ router.get("/all-loans", auth, admin, async (req, res) => {
       idx++;
     }
 
-    // ----------------------------------------
-    // STATUS FILTER
-    // ----------------------------------------
+    // --------------------------------------------------
+    // STATUS FILTER (frontend ↔ DB normalization)
+    // --------------------------------------------------
     if (status) {
-      const statuses = status.split(",").map((s) => s.trim().toLowerCase());
+      const rawStatuses = status
+        .split(",")
+        .map((s) => s.trim().toLowerCase());
+
+      const normalizedStatuses = rawStatuses.map((s) => {
+        if (s === "paid") return "completed";
+        return s;
+      });
+
       where.push(`LOWER(l.status) = ANY($${idx})`);
-      params.push(statuses);
+      params.push(normalizedStatuses);
       idx++;
     }
 
-    // ----------------------------------------
+    // --------------------------------------------------
     // DATE RANGE
-    // ----------------------------------------
+    // --------------------------------------------------
     if (from) {
       where.push(`l.created_at >= $${idx}`);
       params.push(from);
@@ -66,17 +74,17 @@ router.get("/all-loans", auth, admin, async (req, res) => {
 
     const whereSQL = where.length ? `WHERE ${where.join(" AND ")}` : "";
 
-    // ----------------------------------------
+    // --------------------------------------------------
     // SORT
-    // ----------------------------------------
+    // --------------------------------------------------
     const orderSQL =
       sort === "oldest"
         ? "ORDER BY l.created_at ASC"
         : "ORDER BY l.created_at DESC";
 
-    // ----------------------------------------
-    // COUNT QUERY
-    // ----------------------------------------
+    // --------------------------------------------------
+    // COUNT
+    // --------------------------------------------------
     const countSQL = `
       SELECT COUNT(*)::int AS total
       FROM loans l
@@ -87,9 +95,9 @@ router.get("/all-loans", auth, admin, async (req, res) => {
     const countRes = await db.query(countSQL, params);
     const total = countRes.rows[0]?.total || 0;
 
-    // ----------------------------------------
-    // DATA QUERY
-    // ----------------------------------------
+    // --------------------------------------------------
+    // DATA
+    // --------------------------------------------------
     const dataSQL = `
       SELECT 
         l.id,
