@@ -57,7 +57,6 @@ router.get("/all-loans", auth, admin, async (req, res) => {
         l.created_at,
         l.disbursed_at,
         l.completed_at,
-        l.rejected_at,
 
         -- payout
         l.payout_method,
