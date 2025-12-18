@@ -17,7 +17,6 @@ function applyApprovedOverrides(loan) {
 
   const out = { ...loan };
 
-  // Only override if admin has set approved values
   if (loan.approved_principal != null)
     out.principal = Number(loan.approved_principal);
 
@@ -141,9 +140,7 @@ router.get("/my-loans", auth, async (req, res) => {
       [req.user.id]
     );
 
-    // Apply approved override to each row
     const patched = result.rows.map(applyApprovedOverrides);
-
     return res.json(patched);
   } catch (err) {
     console.error(LOG, "❌ my-loans error:", err);
@@ -171,7 +168,7 @@ router.get("/my-latest", auth, async (req, res) => {
 });
 
 /* -------------------------------------------------------------
-   GET Active Loan
+   GET Active Loan  ✅ ADD is_late + days_late
 ------------------------------------------------------------- */
 router.get("/my-active", auth, async (req, res) => {
   try {
@@ -180,7 +177,38 @@ router.get("/my-active", auth, async (req, res) => {
       [req.user.id]
     );
 
-    return res.json(applyApprovedOverrides(r.rows[0]) || null);
+    if (!r.rows.length) return res.json(null);
+
+    const loan = applyApprovedOverrides(r.rows[0]);
+
+    // -------------------------------
+    // LATE CALCULATION (SERVER-SIDE)
+    // -------------------------------
+    let is_late = false;
+    let days_late = 0;
+
+    if (loan.latest_due_date) {
+      const today = new Date();
+      const due = new Date(loan.latest_due_date);
+
+      // Normalize to date-only (avoid time drift)
+      today.setHours(0, 0, 0, 0);
+      due.setHours(0, 0, 0, 0);
+
+      const diffMs = today - due;
+      const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+
+      if (diffDays > 0) {
+        is_late = true;
+        days_late = diffDays;
+      }
+    }
+
+    return res.json({
+      ...loan,
+      is_late,
+      days_late,
+    });
   } catch (err) {
     console.error(LOG, "❌ my-active error:", err);
     return res.status(500).json({ error: "Server error" });
@@ -234,15 +262,6 @@ router.post("/:loanId/accept", auth, async (req, res) => {
     if ((loan.status || "").toLowerCase() !== "approved_pending_disburse") {
       await client.query("ROLLBACK");
       return res.status(400).json({ error: "INVALID_STATUS" });
-    }
-
-    if (
-      loan.approved_principal == null ||
-      loan.approved_total_payable == null ||
-      loan.approved_daily_payment == null
-    ) {
-      await client.query("ROLLBACK");
-      return res.status(400).json({ error: "MISSING_APPROVED_VALUES" });
     }
 
     const now = new Date().toISOString();
