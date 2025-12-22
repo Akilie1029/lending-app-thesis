@@ -45,6 +45,9 @@ const uploadRoutes = require("./routes/uploadRoutes");
 const adminLoanDocuments = require("./routes/adminLoanDocuments");
 const adminUserDocuments = require("./routes/adminUserDocuments");
 
+// Late fee cron
+const startLateFeeCron = require("./services/lateFeeCron");
+
 const app = express();
 const PORT = process.env.PORT || 5001;
 
@@ -96,7 +99,7 @@ app.post("/api/auth/register", async (req, res) => {
     const token = jwt.sign(
       { user: { id: user.id, role: user.role } },
       JWT_SECRET,
-      { expiresIn: "7d" }
+      { expiresIn: "1h" }
     );
 
     res.json({ token, user });
@@ -127,7 +130,7 @@ app.post("/api/auth/login", async (req, res) => {
     const token = jwt.sign(
       { user: { id: user.id, role: safeRole } },
       JWT_SECRET,
-      { expiresIn: "7d" }
+      { expiresIn: "1h" }
     );
 
     // include profile_photo and other useful fields
@@ -364,6 +367,8 @@ app.get("/api/debug/version", (req, res) => {
 // =================================================================
 //                           START SERVER
 // =================================================================
-app.listen(PORT, "0.0.0.0", () =>
-  console.log(`🚀 Backend running on port ${PORT}`)
-);
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(`🚀 Backend running on port ${PORT}`);
+  startLateFeeCron();
+});
+
