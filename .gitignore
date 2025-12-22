@@ -1,7 +1,48 @@
+# =========================
 # Dependencies
-/node_modules
-/ios/pods
-/android/build
+# =========================
+node_modules/
+.yarn-integrity
 
-# System files
+# =========================
+# Environment
+# =========================
+.env
+.env.local
+.env.production
+
+# =========================
+# Logs
+# =========================
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# =========================
+# Android
+# =========================
+android/.gradle/
+android/build/
+android/app/build/
+android/gradle/wrapper/dists/
+*.keystore
+
+# =========================
+# iOS
+# =========================
+ios/Pods/
+ios/build/
+ios/DerivedData/
+ios/*.xcworkspace
+
+# =========================
+# System / IDE
+# =========================
 .DS_Store
+.vscode/
+.idea/
+
+# =========================
+# Misc
+# =========================
+coverage/
