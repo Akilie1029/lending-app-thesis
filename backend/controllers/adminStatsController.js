@@ -120,7 +120,8 @@ async function getDashboardStats(req, res) {
           FROM repayment_schedule rs
           WHERE rs.loan_id = l.id
             AND rs.overdue = TRUE
-        );
+      )
+    `);
 
     const riskExposure = num(riskRes.rows[0]?.overdue_balance);
 
