@@ -45,7 +45,7 @@ async function getDashboardStats(req, res) {
     const pendingDisbursement = num(pendingDisbursementRes.rows[0]?.count);
 
     // ---------------------------
-    // 2) TOTAL DISBURSED
+    // 2) TOTAL DISBURSED (legacy)
     // ---------------------------
     const totalDisbursedLoanRes = await db.query(`
       SELECT COALESCE(SUM(COALESCE(disbursed_amount, amount_requested, total_payable, 0)), 0) AS total
@@ -71,7 +71,7 @@ async function getDashboardStats(req, res) {
     const legacyOverdueAmount = num(loanDistRes.rows[0]?.overdue_amount);
 
     // ---------------------------
-    // 4) PERFORMANCE
+    // 4) PERFORMANCE (lifetime)
     // ---------------------------
     const totalRepaidRes = await db.query(`
       SELECT COALESCE(SUM(amount),0) AS total_repaid
@@ -92,12 +92,16 @@ async function getDashboardStats(req, res) {
       totalPayable === 0 ? 0 : Math.round((totalRepaid / totalPayable) * 100);
 
     // ---------------------------
-    // 5) PORTFOLIO
+    // 5) PORTFOLIO (current)
     // ---------------------------
     const principalRes = await db.query(`
       SELECT
         COALESCE(SUM(COALESCE(approved_principal, disbursed_amount, 0)),0) AS total_principal,
-        COALESCE(SUM(CASE WHEN LOWER(status) = 'active' THEN COALESCE(approved_principal, disbursed_amount, 0) END),0) AS active_principal
+        COALESCE(SUM(
+          CASE WHEN LOWER(status) = 'active'
+          THEN COALESCE(approved_principal, disbursed_amount, 0)
+          END
+        ),0) AS active_principal
       FROM loans
       WHERE disbursed_at IS NOT NULL
     `);
@@ -109,24 +113,38 @@ async function getDashboardStats(req, res) {
       totalPrincipal === 0 ? 0 : Math.round((activePrincipal / totalPrincipal) * 100);
 
     // ---------------------------
-    // ✅ 6) FIXED RISK EXPOSURE (KAURta-correct)
+    // 6) RISK EXPOSURE (KAURta-correct)
+    // Active loans with ≥1 overdue installment
     // ---------------------------
     const riskRes = await db.query(`
       SELECT COALESCE(SUM(l.remaining_balance), 0) AS risk_exposure
       FROM loans l
-      WHERE l.status = 'active'
+      WHERE LOWER(l.status) = 'active'
         AND EXISTS (
           SELECT 1
           FROM repayment_schedule rs
           WHERE rs.loan_id = l.id
             AND rs.overdue = TRUE
-      )
+        )
     `);
 
-    const riskExposure = num(riskRes.rows[0]?.overdue_balance);
+    const riskExposure = num(riskRes.rows[0]?.risk_exposure);
 
     const riskPercent =
       totalPrincipal === 0 ? 0 : Math.round((riskExposure / totalPrincipal) * 100);
+
+    // ---------------------------
+    // 7) LIFETIME CAPITAL DEPLOYED (NEW)
+    // ---------------------------
+    const lifetimeCapitalRes = await db.query(`
+      SELECT COALESCE(SUM(COALESCE(approved_principal, disbursed_amount, 0)), 0) AS lifetime_capital
+      FROM loans
+      WHERE disbursed_at IS NOT NULL
+    `);
+
+    const lifetimeCapitalDeployed = num(
+      lifetimeCapitalRes.rows[0]?.lifetime_capital
+    );
 
     // ---------------------------
     // FINAL RESPONSE
@@ -142,7 +160,7 @@ async function getDashboardStats(req, res) {
       loanStatusDistribution: {
         paidAmount,
         unpaidAmount,
-        overdueAmount: legacyOverdueAmount, // legacy only
+        overdueAmount: legacyOverdueAmount,
       },
 
       performance: {
@@ -158,10 +176,12 @@ async function getDashboardStats(req, res) {
       },
 
       risk: {
-        overdueAmount: riskExposure,              // ✅ now correct
-        activePortfolioBalance: activePrincipal,  // semantic consistency
+        overdueAmount: riskExposure,
+        activePortfolioBalance: activePrincipal,
         percent: riskPercent,
       },
+
+      lifetimeCapitalDeployed, // ✅ NEW
     });
   } catch (err) {
     console.error(LOG_PREFIX, "ERROR:", err);
