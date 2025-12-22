@@ -178,38 +178,23 @@ console.log(LOG_PREFIX, "Portfolio:", {
   portfolioPercent,
 });
 
-// ---------------------------
-// RISK (unchanged)
-// ---------------------------
-
-
+   // ---------------------------
+    // ✅ FIXED: RISK EXPOSURE
     // ---------------------------
-    // NEW: RISK (Overdue Amount vs Active Portfolio Balance)
-    // ---------------------------
-    console.log(LOG_PREFIX, "Calculating risk metrics...");
-    // overdueAmount: sum of remaining_balance where status = 'overdue'
-    // activePortfolioBalance: sum of remaining_balance for active + overdue (what's owed on currently live portfolio)
-    const overdueAmountRes = await db.query(
-      `
-      SELECT COALESCE(SUM(COALESCE(remaining_balance, 0)), 0) AS overdue_amount_sum
-      FROM loans
-      WHERE LOWER(status) = 'overdue'
-      `
-    );
-
-    const activePortfolioBalanceRes = await db.query(
-      `
-      SELECT COALESCE(SUM(COALESCE(remaining_balance, 0)), 0) AS active_portfolio_balance
+    // KAURta definition:
+    // Risk = all money currently exposed (ACTIVE + OVERDUE)
+    const riskExposureRes = await db.query(`
+      SELECT COALESCE(SUM(remaining_balance), 0) AS risk_exposure
       FROM loans
       WHERE LOWER(status) IN ('active','overdue')
-      `
-    );
+    `);
 
-    const overdueAmountSum = num(overdueAmountRes.rows[0]?.overdue_amount_sum);
-    const activePortfolioBalance = num(activePortfolioBalanceRes.rows[0]?.active_portfolio_balance);
-    const riskPercent = activePortfolioBalance === 0 ? 0 : Math.round((overdueAmountSum / activePortfolioBalance) * 100);
+    const riskExposure = num(riskExposureRes.rows[0]?.risk_exposure);
 
-    console.log(LOG_PREFIX, "Risk:", { overdueAmountSum, activePortfolioBalance, riskPercent });
+    const riskPercent =
+      totalPrincipalLent === 0
+        ? 0
+        : Math.round((riskExposure / totalPrincipalLent) * 100);
 
     // ---------------------------
     // 3) PAYMENT OVERVIEW (Last 4 Weeks)
@@ -373,8 +358,8 @@ console.log(LOG_PREFIX, "Portfolio:", {
       },
 
       risk: {
-        overdueAmount: overdueAmountSum,
-        activePortfolioBalance,
+        overdueAmount: overdueAmount, // kept for backward compatibility
+        activePortfolioBalance: riskExposure,
         percent: riskPercent,
       },
 
