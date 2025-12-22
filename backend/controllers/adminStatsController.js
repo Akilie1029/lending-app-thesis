@@ -112,15 +112,15 @@ async function getDashboardStats(req, res) {
     // ✅ 6) FIXED RISK EXPOSURE (KAURta-correct)
     // ---------------------------
     const riskRes = await db.query(`
-      SELECT COALESCE(SUM(l.remaining_balance),0) AS overdue_balance
+      SELECT COALESCE(SUM(l.remaining_balance), 0) AS risk_exposure
       FROM loans l
-      WHERE EXISTS (
-        SELECT 1
-        FROM repayment_schedule rs
-        WHERE rs.loan_id = l.id
-          AND rs.status = 'overdue'
-      )
-    `);
+      WHERE l.status = 'active'
+        AND EXISTS (
+          SELECT 1
+          FROM repayment_schedule rs
+          WHERE rs.loan_id = l.id
+            AND rs.overdue = TRUE
+        );
 
     const riskExposure = num(riskRes.rows[0]?.overdue_balance);
 
