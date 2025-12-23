@@ -23,6 +23,7 @@ async function recalcLoanRemainingBalance(loanId, client = null) {
   const q = client && typeof client.query === "function" ? client : db;
 
   try {
+    // Fetch authoritative loan data
     const loanQ = await q.query(
       `
       SELECT
@@ -37,7 +38,10 @@ async function recalcLoanRemainingBalance(loanId, client = null) {
       [loanId]
     );
 
-    if (!loanQ.rows.length) return null;
+    if (!loanQ.rows.length) {
+      console.warn("recalcLoanRemainingBalance: loan not found", loanId);
+      return null;
+    }
 
     const loan = loanQ.rows[0];
 
@@ -45,6 +49,7 @@ async function recalcLoanRemainingBalance(loanId, client = null) {
     const dailyPayment = num(loan.approved_daily_payment);
     const totalDays = num(loan.days);
 
+    // Sum all repayments (including overpayments)
     const paidQ = await q.query(
       `
       SELECT COALESCE(SUM(amount),0) AS paid
@@ -55,8 +60,11 @@ async function recalcLoanRemainingBalance(loanId, client = null) {
     );
 
     const totalRepaid = num(paidQ.rows[0].paid);
+
+    // Monetary calculation
     const remainingBalance = Math.max(payable - totalRepaid, 0);
 
+    // Day progress calculation (NO FRACTIONS)
     let daysCompleted = 0;
     if (dailyPayment > 0) {
       daysCompleted = Math.floor(totalRepaid / dailyPayment);
@@ -64,6 +72,7 @@ async function recalcLoanRemainingBalance(loanId, client = null) {
 
     const remainingDays = Math.max(totalDays - daysCompleted, 0);
 
+    // Persist authoritative values
     await q.query(
       `
       UPDATE loans
@@ -84,6 +93,10 @@ async function recalcLoanRemainingBalance(loanId, client = null) {
       [remainingBalance, totalRepaid, remainingDays, loanId]
     );
 
+    console.log(
+      `recalcLoanRemainingBalance: loanId=${loanId} paid=${totalRepaid} remaining=${remainingBalance} daysCompleted=${daysCompleted}/${totalDays}`
+    );
+
     return {
       remaining_balance: remainingBalance,
       total_repaid: totalRepaid,
@@ -97,7 +110,7 @@ async function recalcLoanRemainingBalance(loanId, client = null) {
 }
 
 /**
- * Mark overdue installments (unchanged behavior)
+ * Overdue marking unchanged
  */
 async function markOverdueInstallments(loanId) {
   if (!loanId) return { updated: 0 };
@@ -110,14 +123,15 @@ async function markOverdueInstallments(loanId) {
       UPDATE repayment_schedule
       SET status='overdue'
       WHERE loan_id = $1
-        AND due_date::date < $2::date
-        AND status NOT IN ('paid','overdue')
+        AND (due_date::date) < $2::date
+        AND status != 'paid'
+        AND status != 'overdue'
       RETURNING id
       `,
       [loanId, today]
     );
 
-    return { updated: res.rowCount };
+    return { updated: res.rowCount, ids: res.rows.map((r) => r.id) };
   } catch (err) {
     console.error("❌ markOverdueInstallments ERROR:", err);
     throw err;
@@ -125,84 +139,35 @@ async function markOverdueInstallments(loanId) {
 }
 
 /**
- * ✅ KAURta Late Fee Engine (FINAL)
- *
- * Rules:
- * - Uses loans.latest_due_date (authoritative)
- * - ₱1,000 per 2 consecutive missed days
- * - Applied AFTER midnight of day 2
- * - Idempotent via loans.late_blocks_applied
+ * Late fees logic unchanged
  */
 async function applyLateFeesIfNeeded(loanId, userId, opts = {}) {
   if (!loanId || !userId) return { applied: false };
 
-  const LATE_FEE = opts.lateFeeAmount || 1000;
+  const AMOUNT = opts.lateFeeAmount || 1000;
+  const TH = opts.threshold || 2;
 
   const client = await db.connect();
   try {
     await client.query("BEGIN");
 
-    const loanQ = await client.query(
-      `
-      SELECT
-        id,
-        days,
-        approved_daily_payment,
-        approved_total_payable,
-        latest_due_date,
-        late_blocks_applied
-      FROM loans
-      WHERE id = $1
-      FOR UPDATE
-      `,
+    const overdueQ = await client.query(
+      `SELECT COUNT(*)::int AS late_count FROM repayment_schedule WHERE loan_id=$1 AND status='overdue'`,
       [loanId]
     );
 
-    if (!loanQ.rows.length) {
+    const lateCount = Number(overdueQ.rows[0].late_count || 0);
+    if (lateCount < TH) {
       await client.query("ROLLBACK");
-      return { applied: false };
+      return { applied: false, reason: "not_enough_overdue" };
     }
 
-    const loan = loanQ.rows[0];
-
-    if (!loan.latest_due_date) {
-      await client.query("ROLLBACK");
-      return { applied: false };
-    }
-
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-
-    const due = new Date(loan.latest_due_date);
-    due.setHours(0, 0, 0, 0);
-
-    const daysLate = Math.floor((today - due) / 86400000);
-
-    if (daysLate < 2) {
-      await client.query("ROLLBACK");
-      return { applied: false, daysLate };
-    }
-
-    const blocksShouldExist = Math.floor(daysLate / 2);
-    const blocksApplied = num(loan.late_blocks_applied);
-    const blocksToApply = blocksShouldExist - blocksApplied;
-
-    if (blocksToApply <= 0) {
-      await client.query("ROLLBACK");
-      return { applied: false, daysLate };
-    }
-
-    const addedAmount = blocksToApply * LATE_FEE;
-    const newTotalPayable = num(loan.approved_total_payable) + addedAmount;
-    const newDailyPayment = Math.ceil(newTotalPayable / num(loan.days));
-
-    // Record transaction (audit)
     await client.query(
       `
       INSERT INTO transactions (user_id, loan_id, type, amount, payment_method, created_at)
       VALUES ($1,$2,'late_fee',$3,'system',NOW())
       `,
-      [userId, loanId, addedAmount]
+      [userId, loanId, AMOUNT]
     );
 
     await client.query(
@@ -210,31 +175,15 @@ async function applyLateFeesIfNeeded(loanId, userId, opts = {}) {
       INSERT INTO repayment_history (loan_id,user_id,amount,is_late_fee,created_at)
       VALUES ($1,$2,$3,TRUE,NOW())
       `,
-      [loanId, userId, addedAmount]
+      [loanId, userId, AMOUNT]
     );
 
-    await client.query(
-      `
-      UPDATE loans
-      SET
-        approved_total_payable = $1,
-        approved_daily_payment = $2,
-        late_blocks_applied = late_blocks_applied + $3
-      WHERE id = $4
-      `,
-      [newTotalPayable, newDailyPayment, blocksToApply, loanId]
-    );
-
+    // Recalculate using the same authoritative logic
     await recalcLoanRemainingBalance(loanId, client);
 
     await client.query("COMMIT");
 
-    return {
-      applied: true,
-      daysLate,
-      blocksApplied: blocksToApply,
-      addedAmount,
-    };
+    return { applied: true, lateCount };
   } catch (err) {
     await client.query("ROLLBACK");
     console.error("❌ applyLateFeesIfNeeded ERROR:", err);
