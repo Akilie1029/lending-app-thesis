@@ -62,13 +62,13 @@ async function getDashboardStats(req, res) {
       SELECT
         COALESCE(SUM(CASE WHEN LOWER(status) = 'completed' THEN COALESCE(disbursed_amount, total_payable, 0) END), 0) AS paid_amount,
         COALESCE(SUM(CASE WHEN LOWER(status) = 'active' THEN COALESCE(remaining_balance, 0) END), 0) AS unpaid_amount,
-        COALESCE(SUM(CASE WHEN LOWER(status) = 'overdue' THEN COALESCE(remaining_balance, 0) END), 0) AS overdue_amount
+        0::numeric AS overdue_amount
       FROM loans
     `);
 
     const paidAmount = num(loanDistRes.rows[0]?.paid_amount);
     const unpaidAmount = num(loanDistRes.rows[0]?.unpaid_amount);
-    const legacyOverdueAmount = num(loanDistRes.rows[0]?.overdue_amount);
+    const legacyOverdueAmount = 0;
 
     // ---------------------------
     // 4) PERFORMANCE (lifetime)
@@ -114,7 +114,6 @@ async function getDashboardStats(req, res) {
 
     // ---------------------------
     // 6) RISK EXPOSURE (KAURta-correct)
-    // Active loans with ≥1 overdue installment
     // ---------------------------
     const riskRes = await db.query(`
       SELECT COALESCE(SUM(l.remaining_balance), 0) AS risk_exposure
@@ -130,11 +129,12 @@ async function getDashboardStats(req, res) {
 
     const riskExposure = num(riskRes.rows[0]?.risk_exposure);
 
+    // ✅ Risk must be measured against ACTIVE capital only
     const riskPercent =
-      totalPrincipal === 0 ? 0 : Math.round((riskExposure / totalPrincipal) * 100);
+      activePrincipal === 0 ? 0 : Math.round((riskExposure / activePrincipal) * 100);
 
     // ---------------------------
-    // 7) LIFETIME CAPITAL DEPLOYED (NEW)
+    // 7) LIFETIME CAPITAL DEPLOYED
     // ---------------------------
     const lifetimeCapitalRes = await db.query(`
       SELECT COALESCE(SUM(COALESCE(approved_principal, disbursed_amount, 0)), 0) AS lifetime_capital
@@ -160,7 +160,7 @@ async function getDashboardStats(req, res) {
       loanStatusDistribution: {
         paidAmount,
         unpaidAmount,
-        overdueAmount: legacyOverdueAmount,
+        overdueAmount: legacyOverdueAmount, // legacy, always 0
       },
 
       performance: {
@@ -181,7 +181,7 @@ async function getDashboardStats(req, res) {
         percent: riskPercent,
       },
 
-      lifetimeCapitalDeployed, // ✅ NEW
+      lifetimeCapitalDeployed,
     });
   } catch (err) {
     console.error(LOG_PREFIX, "ERROR:", err);
