@@ -9,6 +9,7 @@ const num = (v) => (v == null ? 0 : Number(v));
  *
  * Authoritative rules:
  * - remaining_balance = approved_total_payable - total_repaid
+ * - total_repaid EXCLUDES late fees
  * - days_completed = FLOOR(total_repaid / approved_daily_payment)
  * - remaining_days = GREATEST(days - days_completed, 0)
  *
@@ -45,11 +46,13 @@ async function recalcLoanRemainingBalance(loanId, client = null) {
     const dailyPayment = num(loan.approved_daily_payment);
     const totalDays = num(loan.days);
 
+    // ❗ EXCLUDE late fees from repayment progress
     const paidQ = await q.query(
       `
       SELECT COALESCE(SUM(amount),0) AS paid
       FROM repayment_history
       WHERE loan_id = $1
+        AND is_late_fee = FALSE
       `,
       [loanId]
     );
@@ -125,20 +128,22 @@ async function markOverdueInstallments(loanId) {
 }
 
 /**
- * ✅ KAURta Late Fee Engine (FINAL)
+ * ✅ KAURta Late Fee Engine (BLOCK-RESET MODEL — AUTHORITATIVE)
  *
  * Rules:
- * - Uses loans.latest_due_date (authoritative)
- * - ₱1,000 per 2 consecutive missed days
+ * - Uses loans.latest_due_date as baseline
+ * - ₱1,000 per 2 missed days
  * - Applied AFTER midnight of day 2
- * - Idempotent via loans.late_blocks_applied
+ * - EACH APPLICATION RESETS THE COUNTER
+ * - Payments do NOT cancel earned lateness
+ * - Idempotent via late_blocks_applied
  */
 async function applyLateFeesIfNeeded(loanId, userId, opts = {}) {
   if (!loanId || !userId) return { applied: false };
 
   const LATE_FEE = opts.lateFeeAmount || 1000;
-
   const client = await db.connect();
+
   try {
     await client.query("BEGIN");
 
@@ -158,17 +163,12 @@ async function applyLateFeesIfNeeded(loanId, userId, opts = {}) {
       [loanId]
     );
 
-    if (!loanQ.rows.length) {
+    if (!loanQ.rows.length || !loanQ.rows[0].latest_due_date) {
       await client.query("ROLLBACK");
       return { applied: false };
     }
 
     const loan = loanQ.rows[0];
-
-    if (!loan.latest_due_date) {
-      await client.query("ROLLBACK");
-      return { applied: false };
-    }
 
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -183,6 +183,7 @@ async function applyLateFeesIfNeeded(loanId, userId, opts = {}) {
       return { applied: false, daysLate };
     }
 
+    // BLOCK-RESET MODEL
     const blocksShouldExist = Math.floor(daysLate / 2);
     const blocksApplied = num(loan.late_blocks_applied);
     const blocksToApply = blocksShouldExist - blocksApplied;
@@ -196,7 +197,7 @@ async function applyLateFeesIfNeeded(loanId, userId, opts = {}) {
     const newTotalPayable = num(loan.approved_total_payable) + addedAmount;
     const newDailyPayment = Math.ceil(newTotalPayable / num(loan.days));
 
-    // Record transaction (audit)
+    // Audit records
     await client.query(
       `
       INSERT INTO transactions (user_id, loan_id, type, amount, payment_method, created_at)
@@ -213,6 +214,7 @@ async function applyLateFeesIfNeeded(loanId, userId, opts = {}) {
       [loanId, userId, addedAmount]
     );
 
+    // APPLY BLOCK(S) AND RESET COUNTER
     await client.query(
       `
       UPDATE loans
