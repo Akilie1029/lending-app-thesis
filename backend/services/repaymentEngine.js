@@ -129,14 +129,6 @@ async function markOverdueInstallments(loanId) {
 
 /**
  * ✅ KAURta Late Fee Engine (BLOCK-RESET MODEL — AUTHORITATIVE)
- *
- * Rules:
- * - Uses loans.latest_due_date as baseline
- * - ₱1,000 per 2 missed days
- * - Applied AFTER midnight of day 2
- * - EACH APPLICATION RESETS THE COUNTER
- * - Payments do NOT cancel earned lateness
- * - Idempotent via late_blocks_applied
  */
 async function applyLateFeesIfNeeded(loanId, userId, opts = {}) {
   if (!loanId || !userId) return { applied: false };
@@ -183,7 +175,6 @@ async function applyLateFeesIfNeeded(loanId, userId, opts = {}) {
       return { applied: false, daysLate };
     }
 
-    // BLOCK-RESET MODEL
     const blocksShouldExist = Math.floor(daysLate / 2);
     const blocksApplied = num(loan.late_blocks_applied);
     const blocksToApply = blocksShouldExist - blocksApplied;
@@ -206,15 +197,15 @@ async function applyLateFeesIfNeeded(loanId, userId, opts = {}) {
       [userId, loanId, addedAmount]
     );
 
+    // ✅ FIX: type is now explicitly set
     await client.query(
       `
-      INSERT INTO repayment_history (loan_id,user_id,amount,is_late_fee,created_at)
-      VALUES ($1,$2,$3,TRUE,NOW())
+      INSERT INTO repayment_history (loan_id, user_id, amount, type, is_late_fee, created_at)
+      VALUES ($1, $2, $3, 'late_fee', TRUE, NOW())
       `,
       [loanId, userId, addedAmount]
     );
 
-    // APPLY BLOCK(S) AND RESET COUNTER
     await client.query(
       `
       UPDATE loans
