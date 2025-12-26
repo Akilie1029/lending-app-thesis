@@ -9,41 +9,43 @@ const { recalcLoanRemainingBalance } = require("../services/repaymentEngine");
 async function pushNotification() { return; }
 
 /**
- * Borrower Payment Flow
- *  ✓ Validate ownership
- *  ✓ Determine correct approved totals
- *  ✓ Insert transaction
- *  ✓ Insert repayment_history
- *  ✓ Recalculate remaining balance using SAME client
- *  ✓ Return updated loan
+ * Borrower Payment Flow (AUTHORITATIVE)
+ *
+ * ✓ Validate ownership
+ * ✓ Insert transaction
+ * ✓ Insert repayment_history
+ * ✓ Apply payment to repayment_schedule (clears overdue)
+ * ✓ Advance latest_due_date
+ * ✓ Recalculate remaining balance
  */
 router.post("/pay", auth, async (req, res) => {
   const userId = req.user?.id;
   const { loan_id: loanId, amount, payment_method } = req.body || {};
 
-  console.log("🔔 /api/repayments/pay by:", userId);
-
   if (!userId) return res.status(401).json({ error: "Unauthorized" });
   if (!loanId) return res.status(400).json({ error: "loan_id is required" });
 
   const payAmount = Number(amount);
-  if (!payAmount || payAmount <= 0)
+  if (!payAmount || payAmount <= 0) {
     return res.status(400).json({ error: "Invalid amount" });
+  }
 
   const client = await db.connect();
 
   try {
     await client.query("BEGIN");
 
-    console.log("🔍 Locking loan:", loanId);
-
-    // Fetch loan WITH approved_* values
+    // --------------------------------------------------
+    // Lock loan
+    // --------------------------------------------------
     const loanQ = await client.query(
-      `SELECT *
-       FROM loans
-       WHERE id = $1 AND user_id = $2
-       LIMIT 1
-       FOR UPDATE`,
+      `
+      SELECT *
+      FROM loans
+      WHERE id = $1 AND user_id = $2
+      LIMIT 1
+      FOR UPDATE
+      `,
       [loanId, userId]
     );
 
@@ -54,7 +56,6 @@ router.post("/pay", auth, async (req, res) => {
 
     const loan = loanQ.rows[0];
 
-    // Choose correct totals
     const approvedTotal = Number(
       loan.approved_total_payable ??
       loan.total_payable ??
@@ -64,9 +65,6 @@ router.post("/pay", auth, async (req, res) => {
     const remainingBefore = Number(
       loan.remaining_balance ?? approvedTotal
     );
-
-    console.log("💰 Loan approved_total:", approvedTotal);
-    console.log("💰 Remaining before payment:", remainingBefore);
 
     if (remainingBefore <= 0) {
       await client.query("ROLLBACK");
@@ -79,11 +77,10 @@ router.post("/pay", auth, async (req, res) => {
     }
 
     const appliedAmount = Math.min(payAmount, remainingBefore);
-    console.log(`💳 Applying ${appliedAmount} to loan ${loanId}`);
 
-    // ---------------------------------------------------------
-    // Insert into transactions
-    // ---------------------------------------------------------
+    // --------------------------------------------------
+    // Insert transaction
+    // --------------------------------------------------
     const txRes = await client.query(
       `
       INSERT INTO transactions (
@@ -95,26 +92,90 @@ router.post("/pay", auth, async (req, res) => {
       [userId, loanId, appliedAmount, payment_method || "cash"]
     );
 
-    // ---------------------------------------------------------
-    // Insert repayment_history
-    // ---------------------------------------------------------
+    // --------------------------------------------------
+    // Insert repayment_history (PAYMENT)
+    // --------------------------------------------------
     const rhRes = await client.query(
       `
       INSERT INTO repayment_history (
-        loan_id, user_id, amount, type, created_at
+        loan_id, user_id, amount, type, is_late_fee, created_at
       )
-      VALUES ($1, $2, $3, 'payment', NOW())
+      VALUES ($1, $2, $3, 'payment', FALSE, NOW())
       RETURNING *
       `,
       [loanId, userId, appliedAmount]
     );
 
-    // ---------------------------------------------------------
-    // Recalculate using SAME client
-    // ---------------------------------------------------------
-    const newRemaining = await recalcLoanRemainingBalance(loanId, client);
+    // --------------------------------------------------
+    // APPLY PAYMENT TO REPAYMENT SCHEDULE (CRITICAL FIX)
+    // --------------------------------------------------
+    let remainingToApply = appliedAmount;
 
-    console.log("🔁 New remaining after payment:", newRemaining);
+    const scheduleQ = await client.query(
+      `
+      SELECT id, due_date, amount
+      FROM repayment_schedule
+      WHERE loan_id = $1
+        AND status != 'paid'
+      ORDER BY due_date ASC
+      FOR UPDATE
+      `,
+      [loanId]
+    );
+
+    for (const row of scheduleQ.rows) {
+      if (remainingToApply <= 0) break;
+
+      const installmentAmount = Number(row.amount);
+
+      if (remainingToApply >= installmentAmount) {
+        // Fully cover this installment
+        await client.query(
+          `
+          UPDATE repayment_schedule
+          SET status = 'paid',
+              overdue = FALSE,
+              paid_at = NOW()
+          WHERE id = $1
+          `,
+          [row.id]
+        );
+
+        remainingToApply -= installmentAmount;
+      } else {
+        // Partial payment — stop here (do NOT advance due date)
+        break;
+      }
+    }
+
+    // --------------------------------------------------
+    // UPDATE latest_due_date (NEXT UNPAID INSTALLMENT)
+    // --------------------------------------------------
+    const nextDueQ = await client.query(
+      `
+      SELECT MIN(due_date) AS next_due
+      FROM repayment_schedule
+      WHERE loan_id = $1
+        AND status != 'paid'
+      `,
+      [loanId]
+    );
+
+    const nextDueDate = nextDueQ.rows[0]?.next_due || null;
+
+    await client.query(
+      `
+      UPDATE loans
+      SET latest_due_date = $1
+      WHERE id = $2
+      `,
+      [nextDueDate, loanId]
+    );
+
+    // --------------------------------------------------
+    // Recalculate remaining balance
+    // --------------------------------------------------
+    const newRemaining = await recalcLoanRemainingBalance(loanId, client);
 
     // Fetch updated loan
     const updatedLoanRes = await client.query(
@@ -122,11 +183,9 @@ router.post("/pay", auth, async (req, res) => {
       [loanId]
     );
 
-    const updatedLoan = updatedLoanRes.rows[0];
-
     await client.query("COMMIT");
 
-    pushNotification(); // (no-op)
+    pushNotification(); // no-op
 
     return res.json({
       success: true,
@@ -142,7 +201,7 @@ router.post("/pay", auth, async (req, res) => {
         type: "payment"
       },
       remaining_balance: newRemaining,
-      loan: updatedLoan
+      loan: updatedLoanRes.rows[0]
     });
 
   } catch (err) {
