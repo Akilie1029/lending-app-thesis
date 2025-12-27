@@ -10,16 +10,10 @@ const admin = require("../adminMiddleware");
  *
  * Returns:
  *  - Loan info (joined with user info)
- *  - Repayment schedule (canonical columns)
+ *  - Repayment schedule
  *  - Repayment history
- *  - All loan transactions
- *
- * This route is used by ADMIN REVIEW SCREENS:
- *   - AdminLoanReviewScreen
- *   - AdminLoanDocumentsScreen
- *   - AdminLoanApprovalScreen (View Details)
- *
- * Must be 100% accurate because the frontend depends on it heavily.
+ *  - Transactions
+ *  - Late fee transparency (AUTHORITATIVE)
  */
 
 router.get("/loan/:loanId/details", auth, admin, async (req, res) => {
@@ -28,13 +22,12 @@ router.get("/loan/:loanId/details", auth, admin, async (req, res) => {
   console.log("🔎 [AdminLoanDetails] Fetching details for loanId =", loanId);
 
   if (!loanId || typeof loanId !== "string") {
-    console.warn("⚠️ AdminLoanDetails: invalid loanId", loanId);
     return res.status(400).json({ error: "Invalid loanId" });
   }
 
   try {
     // ============================================================
-    // 1) FETCH LOAN + BORROWER INFO
+    // 1) LOAN + USER
     // ============================================================
     const loanQ = await db.query(
       `
@@ -51,16 +44,14 @@ router.get("/loan/:loanId/details", auth, admin, async (req, res) => {
       [loanId]
     );
 
-    if (loanQ.rows.length === 0) {
-      console.warn("⚠️ AdminLoanDetails: loan not found:", loanId);
+    if (!loanQ.rows.length) {
       return res.status(404).json({ error: "Loan not found" });
     }
 
     const loan = loanQ.rows[0];
-    console.log("📌 Loan found:", loan.id, "status =", loan.status);
 
     // ============================================================
-    // 2) FETCH REPAYMENT SCHEDULE  (canonical)
+    // 2) REPAYMENT SCHEDULE
     // ============================================================
     const scheduleQ = await db.query(
       `
@@ -79,10 +70,8 @@ router.get("/loan/:loanId/details", auth, admin, async (req, res) => {
       [loanId]
     );
 
-    console.log(`📅 Schedule items found: ${scheduleQ.rows.length}`);
-
     // ============================================================
-    // 3) FETCH REPAYMENT HISTORY
+    // 3) REPAYMENT HISTORY
     // ============================================================
     const historyQ = await db.query(
       `
@@ -100,10 +89,8 @@ router.get("/loan/:loanId/details", auth, admin, async (req, res) => {
       [loanId]
     );
 
-    console.log(`📘 Repayment history entries: ${historyQ.rows.length}`);
-
     // ============================================================
-    // 4) FETCH TRANSACTIONS FOR THIS LOAN
+    // 4) TRANSACTIONS
     // ============================================================
     const txQ = await db.query(
       `
@@ -121,26 +108,38 @@ router.get("/loan/:loanId/details", auth, admin, async (req, res) => {
       [loanId]
     );
 
-    console.log(`💳 Transactions found: ${txQ.rows.length}`);
+    // ============================================================
+    // 5) LATE FEE TRANSPARENCY (AUTHORITATIVE)
+    // ============================================================
+    const lateFeeEntries = historyQ.rows.filter(h => h.is_late_fee === true);
+    const totalLateFees = lateFeeEntries.reduce(
+      (sum, r) => sum + Number(r.amount || 0),
+      0
+    );
 
     // ============================================================
-    // 5) BUILD PAYLOAD (structured & stable for the frontend)
+    // 6) PAYLOAD
     // ============================================================
-    const payload = {
+    return res.json({
       loan,
       schedule: scheduleQ.rows || [],
       repayment_history: historyQ.rows || [],
       transactions: txQ.rows || [],
-    };
+      late_fees: {
+        total: totalLateFees,
+        entries: lateFeeEntries.map(e => ({
+          id: e.id,
+          amount: Number(e.amount),
+          created_at: e.created_at,
+        })),
+      },
+    });
 
-    console.log("✅ AdminLoanDetails: returning full payload for loanId:", loanId);
-    return res.json(payload);
   } catch (err) {
     console.error("❌ AdminLoanDetails ERROR:", err);
     return res.status(500).json({
       error: "Server error",
       details: err.message,
-      hint: "Check server logs for SQL or syntax issues (adminLoanDetails.js)",
     });
   }
 });
