@@ -3,10 +3,6 @@ const express = require("express");
 const router = express.Router();
 const db = require("../db");
 const auth = require("../authMiddleware");
-const {
-  applyLateFeesIfNeeded,
-  recalcLoanRemainingBalance,
-} = require("../services/repaymentEngine");
 
 const LOG = "[LOAN_ROUTES]";
 
@@ -172,27 +168,21 @@ router.get("/my-latest", auth, async (req, res) => {
 });
 
 /* -------------------------------------------------------------
-   GET Active Loan  ✅ EVENT-DRIVEN LATE FEE HANDLING
+   GET Active Loan  ✅ ADD is_late + days_late
 ------------------------------------------------------------- */
 router.get("/my-active", auth, async (req, res) => {
-  const client = await db.connect();
   try {
-    await client.query("BEGIN");
-
-    const r = await client.query(
-      `SELECT * FROM loans WHERE user_id = $1 AND LOWER(status) = 'active' LIMIT 1 FOR UPDATE`,
+    const r = await db.query(
+      `SELECT * FROM loans WHERE user_id = $1 AND LOWER(status) = 'active' LIMIT 1`,
       [req.user.id]
     );
 
-    if (!r.rows.length) {
-      await client.query("ROLLBACK");
-      return res.json(null);
-    }
+    if (!r.rows.length) return res.json(null);
 
-    let loan = applyApprovedOverrides(r.rows[0]);
+    const loan = applyApprovedOverrides(r.rows[0]);
 
     // -------------------------------
-    // LATE CALCULATION
+    // LATE CALCULATION (SERVER-SIDE)
     // -------------------------------
     let is_late = false;
     let days_late = 0;
@@ -201,6 +191,7 @@ router.get("/my-active", auth, async (req, res) => {
       const today = new Date();
       const due = new Date(loan.latest_due_date);
 
+      // Normalize to date-only (avoid time drift)
       today.setHours(0, 0, 0, 0);
       due.setHours(0, 0, 0, 0);
 
@@ -210,25 +201,8 @@ router.get("/my-active", auth, async (req, res) => {
       if (diffDays > 0) {
         is_late = true;
         days_late = diffDays;
-
-        // ✅ APPLY LATE FEES (IDEMPOTENT)
-        await applyLateFeesIfNeeded(loan.id, loan.user_id, {
-          lateFeeAmount: 1000,
-        });
-
-        // ✅ RECALCULATE BALANCE
-        await recalcLoanRemainingBalance(loan.id, client);
-
-        // Reload updated loan
-        const refreshed = await client.query(
-          `SELECT * FROM loans WHERE id = $1 LIMIT 1`,
-          [loan.id]
-        );
-        loan = applyApprovedOverrides(refreshed.rows[0]);
       }
     }
-
-    await client.query("COMMIT");
 
     return res.json({
       ...loan,
@@ -236,11 +210,8 @@ router.get("/my-active", auth, async (req, res) => {
       days_late,
     });
   } catch (err) {
-    await client.query("ROLLBACK");
     console.error(LOG, "❌ my-active error:", err);
     return res.status(500).json({ error: "Server error" });
-  } finally {
-    client.release();
   }
 });
 
