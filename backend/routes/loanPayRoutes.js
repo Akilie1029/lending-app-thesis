@@ -10,13 +10,6 @@ async function pushNotification() { return; }
 
 /**
  * Borrower Payment Flow (AUTHORITATIVE)
- *
- * ✓ Validate ownership
- * ✓ Insert transaction
- * ✓ Insert repayment_history
- * ✓ Apply payment to repayment_schedule (clears overdue)
- * ✓ Advance latest_due_date
- * ✓ Recalculate remaining balance
  */
 router.post("/pay", auth, async (req, res) => {
   const userId = req.user?.id;
@@ -107,13 +100,13 @@ router.post("/pay", auth, async (req, res) => {
     );
 
     // --------------------------------------------------
-    // APPLY PAYMENT TO REPAYMENT SCHEDULE (CRITICAL FIX)
+    // APPLY PAYMENT TO REPAYMENT SCHEDULE (FIXED)
     // --------------------------------------------------
     let remainingToApply = appliedAmount;
 
     const scheduleQ = await client.query(
       `
-      SELECT id, due_date, amount
+      SELECT id, due_date, expected_amount
       FROM repayment_schedule
       WHERE loan_id = $1
         AND status != 'paid'
@@ -126,10 +119,9 @@ router.post("/pay", auth, async (req, res) => {
     for (const row of scheduleQ.rows) {
       if (remainingToApply <= 0) break;
 
-      const installmentAmount = Number(row.amount);
+      const installmentAmount = Number(row.expected_amount);
 
       if (remainingToApply >= installmentAmount) {
-        // Fully cover this installment
         await client.query(
           `
           UPDATE repayment_schedule
@@ -143,13 +135,12 @@ router.post("/pay", auth, async (req, res) => {
 
         remainingToApply -= installmentAmount;
       } else {
-        // Partial payment — stop here (do NOT advance due date)
         break;
       }
     }
 
     // --------------------------------------------------
-    // UPDATE latest_due_date (NEXT UNPAID INSTALLMENT)
+    // UPDATE latest_due_date
     // --------------------------------------------------
     const nextDueQ = await client.query(
       `
@@ -177,7 +168,6 @@ router.post("/pay", auth, async (req, res) => {
     // --------------------------------------------------
     const newRemaining = await recalcLoanRemainingBalance(loanId, client);
 
-    // Fetch updated loan
     const updatedLoanRes = await client.query(
       `SELECT * FROM loans WHERE id = $1 LIMIT 1`,
       [loanId]
@@ -185,7 +175,7 @@ router.post("/pay", auth, async (req, res) => {
 
     await client.query("COMMIT");
 
-    pushNotification(); // no-op
+    pushNotification();
 
     return res.json({
       success: true,
