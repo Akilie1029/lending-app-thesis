@@ -3,6 +3,7 @@ const express = require("express");
 const router = express.Router();
 const db = require("../db");
 const auth = require("../authMiddleware");
+const { applyLateFeesIfNeeded } = require("../services/repaymentEngine");
 
 const LOG = "[LOAN_ROUTES]";
 
@@ -168,35 +169,48 @@ router.get("/my-latest", auth, async (req, res) => {
 });
 
 /* -------------------------------------------------------------
-   GET Active Loan  ✅ ADD is_late + days_late
+   GET Active Loan (EVENT-DRIVEN LATE FEE APPLICATION)
 ------------------------------------------------------------- */
 router.get("/my-active", auth, async (req, res) => {
   try {
+    const userId = req.user.id;
+
     const r = await db.query(
       `SELECT * FROM loans WHERE user_id = $1 AND LOWER(status) = 'active' LIMIT 1`,
-      [req.user.id]
+      [userId]
     );
 
     if (!r.rows.length) return res.json(null);
 
-    const loan = applyApprovedOverrides(r.rows[0]);
+    const loan = r.rows[0];
+
+    // --------------------------------------------------
+    // APPLY LATE FEES (EVENT-DRIVEN, IDEMPOTENT)
+    // --------------------------------------------------
+    await applyLateFeesIfNeeded(loan.id, userId);
+
+    // Re-fetch loan to reflect updates
+    const refreshed = await db.query(
+      `SELECT * FROM loans WHERE id = $1 LIMIT 1`,
+      [loan.id]
+    );
+
+    const finalLoan = applyApprovedOverrides(refreshed.rows[0]);
 
     // -------------------------------
-    // LATE CALCULATION (SERVER-SIDE)
+    // LATE CALCULATION (READ-ONLY)
     // -------------------------------
     let is_late = false;
     let days_late = 0;
 
-    if (loan.latest_due_date) {
+    if (finalLoan.latest_due_date) {
       const today = new Date();
-      const due = new Date(loan.latest_due_date);
+      const due = new Date(finalLoan.latest_due_date);
 
-      // Normalize to date-only (avoid time drift)
       today.setHours(0, 0, 0, 0);
       due.setHours(0, 0, 0, 0);
 
-      const diffMs = today - due;
-      const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+      const diffDays = Math.floor((today - due) / 86400000);
 
       if (diffDays > 0) {
         is_late = true;
@@ -205,7 +219,7 @@ router.get("/my-active", auth, async (req, res) => {
     }
 
     return res.json({
-      ...loan,
+      ...finalLoan,
       is_late,
       days_late,
     });
