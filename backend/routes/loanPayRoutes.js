@@ -100,7 +100,7 @@ router.post("/pay", auth, async (req, res) => {
     );
 
     // --------------------------------------------------
-    // APPLY PAYMENT TO REPAYMENT SCHEDULE (FIXED)
+    // APPLY PAYMENT TO REPAYMENT SCHEDULE
     // --------------------------------------------------
     let remainingToApply = appliedAmount;
 
@@ -140,7 +140,7 @@ router.post("/pay", auth, async (req, res) => {
     }
 
     // --------------------------------------------------
-    // UPDATE latest_due_date
+    // FIXED: UPDATE latest_due_date (RESET LATE STATE)
     // --------------------------------------------------
     const nextDueQ = await client.query(
       `
@@ -148,11 +148,12 @@ router.post("/pay", auth, async (req, res) => {
       FROM repayment_schedule
       WHERE loan_id = $1
         AND status != 'paid'
+        AND due_date >= CURRENT_DATE
       `,
       [loanId]
     );
 
-    const nextDueDate = nextDueQ.rows[0]?.next_due || null;
+    const nextDueDate = nextDueQ.rows[0]?.next_due || new Date();
 
     await client.query(
       `
