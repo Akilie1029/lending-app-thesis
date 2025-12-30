@@ -43,7 +43,7 @@ async function recalcLoanRemainingBalance(loanId, client = null) {
 
     const paidQ = await q.query(
       `
-      SELECT COALESCE(SUM(amount),0) AS paid
+      SELECT COALESCE(SUM(amount), 0)::numeric AS paid
       FROM repayment_history
       WHERE loan_id = $1
         AND is_late_fee = FALSE
@@ -63,15 +63,15 @@ async function recalcLoanRemainingBalance(loanId, client = null) {
       `
       UPDATE loans
       SET
-        remaining_balance = $1,
-        total_repaid = $2,
-        remaining_days = $3,
+        remaining_balance = $1::numeric,
+        total_repaid = $2::numeric,
+        remaining_days = $3::int,
         status = CASE
-          WHEN $1 <= 0 THEN 'completed'
+          WHEN $1::numeric <= 0 THEN 'completed'
           ELSE status
         END,
         completed_at = CASE
-          WHEN $1 <= 0 THEN COALESCE(completed_at, NOW())
+          WHEN $1::numeric <= 0 THEN COALESCE(completed_at, NOW())
           ELSE completed_at
         END
       WHERE id = $4
@@ -108,7 +108,7 @@ async function applyLateFeesIfNeeded(loanId, userId, opts = {}) {
   try {
     await client.query("BEGIN");
 
-    // 🔑 CHECK: Was there a payment made TODAY?
+    // 🔑 Check: was a payment made today?
     const paidTodayQ = await client.query(
       `
       SELECT 1
@@ -122,7 +122,7 @@ async function applyLateFeesIfNeeded(loanId, userId, opts = {}) {
     );
 
     if (paidTodayQ.rows.length) {
-      // RESET late session
+      // Reset late session
       await client.query(
         `
         UPDATE loans
@@ -189,7 +189,7 @@ async function applyLateFeesIfNeeded(loanId, userId, opts = {}) {
     await client.query(
       `
       INSERT INTO transactions (user_id, loan_id, type, amount, payment_method, created_at)
-      VALUES ($1, $2, 'late_fee', $3, 'system', NOW())
+      VALUES ($1, $2, 'late_fee', $3::numeric, 'system', NOW())
       `,
       [userId, loanId, addedAmount]
     );
@@ -197,7 +197,7 @@ async function applyLateFeesIfNeeded(loanId, userId, opts = {}) {
     await client.query(
       `
       INSERT INTO repayment_history (loan_id, user_id, amount, type, is_late_fee, created_at)
-      VALUES ($1, $2, $3, 'late_fee', TRUE, NOW())
+      VALUES ($1, $2, $3::numeric, 'late_fee', TRUE, NOW())
       `,
       [loanId, userId, addedAmount]
     );
@@ -206,8 +206,8 @@ async function applyLateFeesIfNeeded(loanId, userId, opts = {}) {
       `
       UPDATE loans
       SET
-        approved_total_payable = $1,
-        approved_daily_payment = $2,
+        approved_total_payable = $1::numeric,
+        approved_daily_payment = $2::numeric,
         late_blocks_applied = late_blocks_applied + $3
       WHERE id = $4
       `,
