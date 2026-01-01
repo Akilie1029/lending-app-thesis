@@ -1,4 +1,3 @@
-// controllers/adminStatsController.js
 const db = require("../db");
 
 // Helper to safely convert DB values to number
@@ -39,7 +38,7 @@ async function getDashboardStats(req, res) {
         "SELECT COUNT(*)::int AS count FROM loans WHERE LOWER(status) = 'active'"
       ),
 
-      // ✅ OVERDUE (DERIVED, NOT STATUS)
+      // ✅ OVERDUE (derived, not a status)
       db.query(`
         SELECT COUNT(*)::int AS count
         FROM loans
@@ -70,7 +69,7 @@ async function getDashboardStats(req, res) {
     // ---------------------------
     const totalDisbursedLoanRes = await db.query(`
       SELECT COALESCE(
-        SUM(COALESCE(disbursed_amount, amount_requested, total_payable, 0)), 
+        SUM(COALESCE(disbursed_amount, amount_requested, total_payable, 0)),
         0
       ) AS total
       FROM loans
@@ -80,7 +79,7 @@ async function getDashboardStats(req, res) {
     const totalDisbursedLoan = num(totalDisbursedLoanRes.rows[0]?.total);
 
     // ---------------------------
-    // 3) LOAN STATUS DISTRIBUTION (LEGACY)
+    // 3) LOAN STATUS DISTRIBUTION (legacy)
     // ---------------------------
     const loanDistRes = await db.query(`
       SELECT
@@ -138,7 +137,7 @@ async function getDashboardStats(req, res) {
     const principalRes = await db.query(`
       SELECT
         COALESCE(
-          SUM(COALESCE(approved_principal, disbursed_amount, 0)), 
+          SUM(COALESCE(approved_principal, disbursed_amount, 0)),
           0
         ) AS total_principal,
 
@@ -163,14 +162,18 @@ async function getDashboardStats(req, res) {
         : Math.round((activePrincipal / totalPrincipal) * 100);
 
     // ---------------------------
-    // 6) RISK EXPOSURE (KAURta-correct)
+    // 6) RISK EXPOSURE (KAURta-authoritative)
     // ---------------------------
     const riskRes = await db.query(`
       SELECT COALESCE(SUM(l.remaining_balance), 0) AS risk_exposure
       FROM loans l
       WHERE LOWER(l.status) = 'active'
-        AND l.latest_due_date IS NOT NULL
-        AND CURRENT_DATE > l.latest_due_date::date
+        AND EXISTS (
+          SELECT 1
+          FROM repayment_schedule rs
+          WHERE rs.loan_id = l.id
+            AND rs.overdue = TRUE
+        )
     `);
 
     const riskExposure = num(riskRes.rows[0]?.risk_exposure);
@@ -185,7 +188,7 @@ async function getDashboardStats(req, res) {
     // ---------------------------
     const lifetimeCapitalRes = await db.query(`
       SELECT COALESCE(
-        SUM(COALESCE(approved_principal, disbursed_amount, 0)), 
+        SUM(COALESCE(approved_principal, disbursed_amount, 0)),
         0
       ) AS lifetime_capital
       FROM loans
@@ -202,7 +205,7 @@ async function getDashboardStats(req, res) {
     return res.json({
       borrowerCount,
       activeLoanCount,
-      overdueCount, // ✅ REPLACED rejectedCount
+      overdueCount,
       pendingLoanApproval,
       pendingDisbursement,
       totalDisbursedLoan,
