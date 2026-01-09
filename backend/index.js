@@ -369,6 +369,6 @@ app.get("/api/debug/version", (req, res) => {
 // =================================================================
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`🚀 Backend running on port ${PORT}`);
-  startLateFeeCron();
+  //startLateFeeCron();
 });
 

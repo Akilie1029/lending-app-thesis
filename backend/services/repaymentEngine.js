@@ -12,6 +12,7 @@ const num = (v) => (v == null ? 0 : Number(v));
  * - total_repaid EXCLUDES late fees
  * - days_completed = FLOOR(total_repaid / approved_daily_payment)
  * - remaining_days = GREATEST(days - days_completed, 0)
+ * - If a payment is made today, next due date MUST advance to tomorrow
  */
 async function recalcLoanRemainingBalance(loanId, client = null) {
   if (!loanId) return null;
@@ -25,6 +26,7 @@ async function recalcLoanRemainingBalance(loanId, client = null) {
         id,
         days,
         approved_daily_payment,
+        latest_due_date,
         COALESCE(approved_total_payable, total_payable) AS payable
       FROM loans
       WHERE id = $1
@@ -59,6 +61,28 @@ async function recalcLoanRemainingBalance(loanId, client = null) {
 
     const remainingDays = Math.max(totalDays - daysCompleted, 0);
 
+    // 🔑 Check: was a real payment made today?
+    const paidTodayQ = await q.query(
+      `
+      SELECT 1
+      FROM repayment_history
+      WHERE loan_id = $1
+        AND is_late_fee = FALSE
+        AND created_at::date = CURRENT_DATE
+      LIMIT 1
+      `,
+      [loanId]
+    );
+
+    let nextDueDateUpdate = "";
+    let nextDueDateParams = [];
+
+    if (paidTodayQ.rows.length) {
+      nextDueDateUpdate = `,
+        latest_due_date = CURRENT_DATE + INTERVAL '1 day'
+      `;
+    }
+
     await q.query(
       `
       UPDATE loans
@@ -74,6 +98,7 @@ async function recalcLoanRemainingBalance(loanId, client = null) {
           WHEN $1::numeric <= 0 THEN COALESCE(completed_at, NOW())
           ELSE completed_at
         END
+        ${nextDueDateUpdate}
       WHERE id = $4
       `,
       [remainingBalance, totalRepaid, remainingDays, loanId]
@@ -93,11 +118,6 @@ async function recalcLoanRemainingBalance(loanId, client = null) {
 
 /**
  * KAURta Late Fee Engine — SESSION-RESET MODEL (AUTHORITATIVE)
- *
- * Rules:
- * - Late fee applies every 2 consecutive late days
- * - Late session RESETS if ANY payment is made today
- * - Already-earned late fees are NOT cancelled
  */
 async function applyLateFeesIfNeeded(loanId, userId, opts = {}) {
   if (!loanId || !userId) return { applied: false };
@@ -108,7 +128,6 @@ async function applyLateFeesIfNeeded(loanId, userId, opts = {}) {
   try {
     await client.query("BEGIN");
 
-    // 🔑 Check: was a payment made today?
     const paidTodayQ = await client.query(
       `
       SELECT 1
@@ -122,7 +141,6 @@ async function applyLateFeesIfNeeded(loanId, userId, opts = {}) {
     );
 
     if (paidTodayQ.rows.length) {
-      // Reset late session
       await client.query(
         `
         UPDATE loans
@@ -136,7 +154,6 @@ async function applyLateFeesIfNeeded(loanId, userId, opts = {}) {
       return { applied: false, reset: true };
     }
 
-    // 🔒 Lock loan
     const loanQ = await client.query(
       `
       SELECT
