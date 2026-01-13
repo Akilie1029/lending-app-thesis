@@ -15,7 +15,7 @@ router.get("/all-loans", auth, admin, async (req, res) => {
       status,
       from,
       to,
-      sort = "newest",
+      sort = "newest", // ✅ Default to newest
       page = 1,
       limit = 20,
     } = req.query;
@@ -75,7 +75,7 @@ router.get("/all-loans", auth, admin, async (req, res) => {
     const whereSQL = where.length ? `WHERE ${where.join(" AND ")}` : "";
 
     // --------------------------------------------------
-    // SORT
+    // SORT - ✅ FIXED: Default to DESC (newest first)
     // --------------------------------------------------
     const orderSQL =
       sort === "oldest"
@@ -148,9 +148,15 @@ router.get("/all-loans", auth, admin, async (req, res) => {
 
     console.log(LOG, "➡ Returned:", rs.rows.length, "of", total);
 
+    // ✅ ADDED: Include meta information for pagination
     return res.json({
       count: total,
       loans: rs.rows,
+      meta: {
+        page: pageNum,
+        limit: limitNum,
+        total: total,
+      },
     });
   } catch (err) {
     console.error(LOG, "❌ ERROR:", err);
