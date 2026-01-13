@@ -31,14 +31,14 @@ async function getAllPayments(req, res) {
     const to = req.query.to || null;
     const method = (req.query.method || "").trim().toLowerCase();
 
-    // pagination
+    // ✅ FIXED: Increased default limit from 25 to 100 to show more payments
     const page = Math.max(1, parseInt(req.query.page || "1", 10));
-    const limit = Math.max(1, Math.min(200, parseInt(req.query.limit || "25", 10)));
+    const limit = Math.max(1, Math.min(500, parseInt(req.query.limit || "100", 10)));
     const offset = (page - 1) * limit;
 
-    // sorting
+    // sorting - ✅ FIXED: Default sort is now -created_at (newest first)
     const sortRaw = req.query.sort || "-created_at";
-    let sortColumn = "created_at";
+    let sortColumn = "t.created_at"; // ✅ Added table prefix
     let sortDir = "DESC";
 
     if (sortRaw.startsWith("-")) {
@@ -50,21 +50,26 @@ async function getAllPayments(req, res) {
     }
 
     const ALLOWED_SORTS = ["created_at", "amount"];
-    if (!ALLOWED_SORTS.includes(sortColumn)) {
+    const baseSort = sortColumn.replace("t.", ""); // Remove prefix for validation
+    
+    if (!ALLOWED_SORTS.includes(baseSort)) {
       console.warn("⚠️ Invalid sort column, defaulting to created_at");
-      sortColumn = "created_at";
+      sortColumn = "t.created_at";
+    } else {
+      sortColumn = `t.${baseSort}`; // Add table prefix
     }
 
     console.log(`📌 Sorting by: ${sortColumn} ${sortDir}`);
 
-    const allowedTypes = ["loan_payment", "repayment", "late_fee"];
+    // ✅ FIXED: Exclude late_fee from default view
+    const allowedTypes = ["loan_payment", "repayment"];
 
     // build SQL
     const wheres = [];
     const params = [];
     let idx = 1;
 
-    // only allowed payment types
+    // only allowed payment types (excludes late_fee)
     wheres.push(`t.type = ANY($${idx}::text[])`);
     params.push(allowedTypes);
     idx++;
