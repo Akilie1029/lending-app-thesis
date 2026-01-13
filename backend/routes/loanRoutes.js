@@ -169,6 +169,48 @@ router.get("/my-latest", auth, async (req, res) => {
 });
 
 /* -------------------------------------------------------------
+   APPLY LATE FEES FOR ALL ACTIVE LOANS (Login optimization)
+   ✅ NEW: Called automatically on login to update all balances
+------------------------------------------------------------- */
+router.post("/apply-late-fees", auth, async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    // Get all active loans for this user
+    const loansQ = await db.query(
+      `SELECT id FROM loans 
+       WHERE user_id = $1 
+       AND LOWER(status) = 'active'`,
+      [userId]
+    );
+
+    // Apply late fees to each active loan
+    const results = [];
+    for (const loan of loansQ.rows) {
+      try {
+        const result = await applyLateFeesIfNeeded(loan.id, userId);
+        results.push({ loan_id: loan.id, ...result });
+      } catch (err) {
+        console.error(LOG, `❌ Late fee error for loan ${loan.id}:`, err);
+        results.push({ loan_id: loan.id, error: err.message });
+      }
+    }
+
+    return res.json({ 
+      success: true,
+      message: "Late fees processed",
+      results 
+    });
+  } catch (err) {
+    console.error(LOG, "❌ Apply late fees error:", err);
+    return res.status(500).json({ 
+      error: "Server error",
+      details: err.message 
+    });
+  }
+});
+
+/* -------------------------------------------------------------
    GET Active Loan (EVENT-DRIVEN LATE FEE APPLICATION)
 ------------------------------------------------------------- */
 router.get("/my-active", auth, async (req, res) => {
